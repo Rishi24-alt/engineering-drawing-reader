@@ -1,5 +1,5 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║                        DraftIQ — app.py                       ║
+# ║                        DrawingAI — app.py                       ║
 # ║         AI-powered engineering drawing analysis tool            ║
 # ║                       by Rishi  ·  2025                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -14,6 +14,12 @@ from utils import (
     analyze_material,
     analyze_manufacturing,
     detect_dimensions,
+    # ── 5 new features ──
+    analyze_tolerance_stackup,
+    analyze_manufacturability_score,
+    estimate_cost,
+    detect_missing_dimensions,
+    compare_revisions,
 )
 import json, os, re, time, base64, shutil
 from datetime import datetime
@@ -381,8 +387,8 @@ def render_title_block(raw):
 # ══════════════════════════════════════════════════════════════════
 
 st.set_page_config(
-    page_title="DraftIQ",
-    page_icon="🧠",
+    page_title="Draft AI",
+    page_icon=":pencil:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -395,16 +401,16 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* ── FONTS ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* ── FONTS — Professional system stack (Helvetica Neue primary) ── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
 /* ── RESET ── */
 * { box-sizing: border-box; }
 
 /* ── BASE PAGE BACKGROUND ── */
-html, body                          { background: #0d0d0d !important; font-family: 'Inter', sans-serif; }
-[data-testid="stAppViewContainer"]  { background: #0d0d0d !important; }
-[data-testid="stMain"]              { background: #0d0d0d !important; overflow-y: auto !important; }
+html, body                          { background: #0a0a0a !important; font-family: 'Helvetica Neue', Helvetica, Arial, 'DM Sans', sans-serif; letter-spacing: -0.01em; }
+[data-testid="stAppViewContainer"]  { background: #0a0a0a !important; }
+[data-testid="stMain"]              { background: #0a0a0a !important; overflow-y: auto !important; }
 
 /* ── SUBTLE RADIAL GLOW (decorative background) ── */
 [data-testid="stAppViewContainer"]::before {
@@ -413,15 +419,15 @@ html, body                          { background: #0d0d0d !important; font-famil
     top: 0; left: 0;
     width: 100%; height: 100%;
     background:
-        radial-gradient(ellipse 50% 40% at 20% 20%, rgba(249,115,22,0.04) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(249,115,22,0.03) 0%, transparent 70%);
+        radial-gradient(ellipse 50% 40% at 20% 20%, rgba(249,115,22,0.035) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 80% 80%, rgba(249,115,22,0.025) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
 }
 
 /* ── MAIN CONTENT CONTAINER ── */
 .block-container {
-    max-width: 880px !important;
+    max-width: 900px !important;
     margin: 0 auto !important;
     padding: 40px 8px 120px 8px !important;
     min-height: 100vh !important;
@@ -430,7 +436,7 @@ html, body                          { background: #0d0d0d !important; font-famil
 /* ── HIDE STREAMLIT DEFAULT UI (deploy button, menu, footer) ── */
 .stDeployButton, #MainMenu, footer { display: none !important; }
 
-/* ── SIDEBAR TOGGLE BUTTON (the << >> collapse arrow) ── */
+/* ── SIDEBAR TOGGLE BUTTON ── */
 [data-testid="collapsedControl"] {
     position: fixed !important;
     top: 18px !important;
@@ -439,9 +445,9 @@ html, body                          { background: #0d0d0d !important; font-famil
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
-    background: rgba(249,115,22,0.18) !important;
-    border: 1px solid rgba(249,115,22,0.35) !important;
-    border-radius: 8px !important;
+    background: rgba(249,115,22,0.12) !important;
+    border: 1px solid rgba(249,115,22,0.28) !important;
+    border-radius: 6px !important;
     padding: 6px 10px !important;
     cursor: pointer !important;
 }
@@ -456,66 +462,78 @@ html, body                          { background: #0d0d0d !important; font-famil
 html, body { overflow-y: auto; }
 [data-testid="stAppViewContainer"] { overflow-y: auto !important; height: 100vh; }
 
-/* ── STREAMLIT HEADER (kept transparent so toggle stays visible) ── */
+/* ── STREAMLIT HEADER ── */
 [data-testid="stHeader"] { background: transparent !important; }
 
 /* ── SIDEBAR PANEL ── */
 [data-testid="stSidebar"] {
-    background: #0f0f0f !important;
-    border-right: 1px solid rgba(255,255,255,0.05) !important;
+    background: #0d0d0d !important;
+    border-right: 1px solid rgba(255,255,255,0.04) !important;
 }
-[data-testid="stSidebar"] > div:first-child { padding: 24px 16px !important; }
+[data-testid="stSidebar"] > div:first-child { padding: 28px 18px !important; }
 
-/* Sidebar logo and subtitle */
+/* Sidebar branding */
 .sb-logo {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 500;
-    color: #f97316;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #fff;
     margin-bottom: 2px;
     margin-top: -12px;
 }
+.sb-logo span { color: #f97316; }
 .sb-sub {
     font-size: 10px;
-    color: rgba(255,255,255,0.2);
-    font-family: 'JetBrains Mono', monospace;
-    margin-top: -6px;
-    margin-bottom: 16px;
-}
-
-/* Sidebar section labels (NAVIGATION, CHAT HISTORY, etc.) */
-.sb-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
     color: rgba(255,255,255,0.18);
-    margin-bottom: 8px;
-    margin-top: 14px;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    letter-spacing: 0.04em;
+    margin-top: -2px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
 }
 
-/* Sidebar quota counter (e.g. "3 / 20 chats saved") */
-.sb-quota       { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.22); margin-bottom: 12px; }
-.sb-quota span  { color: #f97316; }
+/* Sidebar section labels */
+.sb-label {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.2);
+    margin-bottom: 8px;
+    margin-top: 16px;
+    font-weight: 600;
+}
 
-/* Sidebar nav/history buttons */
+/* Sidebar quota */
+.sb-quota       { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11px; color: rgba(255,255,255,0.2); margin-bottom: 12px; }
+.sb-quota span  { color: #f97316; font-weight: 600; }
+
+/* Sidebar buttons */
 [data-testid="stSidebar"] .stButton > button {
     background: rgba(255,255,255,0.03) !important;
     border: 1px solid rgba(255,255,255,0.06) !important;
-    color: rgba(255,255,255,0.6) !important;
-    border-radius: 8px !important;
+    color: rgba(255,255,255,0.55) !important;
+    border-radius: 6px !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
     font-size: 12px !important;
+    font-weight: 400 !important;
     padding: 9px 12px !important;
     width: 100% !important;
     text-align: left !important;
-    margin-bottom: 4px !important;
-    transition: all 0.15s !important;
+    margin-bottom: 3px !important;
+    transition: all 0.12s !important;
+    letter-spacing: 0em !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(249,115,22,0.08) !important;
-    border-color: rgba(249,115,22,0.2) !important;
+    background: rgba(249,115,22,0.07) !important;
+    border-color: rgba(249,115,22,0.18) !important;
     color: #f97316 !important;
 }
+
+/* ── SPINNING GEAR ANIMATION ── */
+@keyframes spinGear { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.gear-spin { display: inline-block; animation: spinGear 6s linear infinite; }
 
 /* ── TOP NAV BAR ── */
 .top-nav {
@@ -526,70 +544,82 @@ html, body { overflow-y: auto; }
     border-bottom: 1px solid rgba(255,255,255,0.05);
     margin-bottom: 12px;
     margin-top: 0 !important;
-    background: rgba(13,13,13,0.98) !important;
+    background: rgba(10,10,10,0.98) !important;
     z-index: 100;
 }
-.nav-title       { font-size: 26px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; }
-.nav-title span  { color: #f97316; }
-.nav-icon        { animation: spinSlow 8s linear infinite; display: inline-block; }
-.nav-badge       { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #f97316; border: 1px solid rgba(249,115,22,0.3); padding: 3px 8px; border-radius: 20px; letter-spacing: 1px; }
-.nav-right       { display: flex; gap: 8px; align-items: center; }
-.nav-tab         { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.35); padding: 4px 10px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; text-transform: uppercase; transition: all 0.15s; }
-.nav-tab.active  { color: #f97316; background: rgba(249,115,22,0.1); border: 1px solid rgba(249,115,22,0.2); }
-
-/* Spinning gear icon animation */
-@keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ── FILE UPLOADER ── */
 [data-testid="stFileUploader"] > div {
-    border: 1.5px dashed rgba(255,255,255,0.08) !important;
-    background: rgba(255,255,255,0.02) !important;
+    border: 1.5px dashed rgba(255,255,255,0.07) !important;
+    background: rgba(255,255,255,0.015) !important;
     border-radius: 8px !important;
     padding: 8px 14px !important;
 }
-[data-testid="stFileUploader"] > div:hover           { border-color: rgba(249,115,22,0.3) !important; }
+[data-testid="stFileUploader"] > div:hover           { border-color: rgba(249,115,22,0.28) !important; }
 [data-testid="stFileUploader"] label                 { display: none !important; }
-[data-testid="stFileUploader"] button                { background: rgba(249,115,22,0.1) !important; border: 1px solid rgba(249,115,22,0.2) !important; color: #f97316 !important; border-radius: 6px !important; font-size: 11px !important; }
-[data-testid="stFileUploaderDropzoneInstructions"]   { font-size: 11px !important; color: rgba(255,255,255,0.2) !important; }
-[data-testid="stImage"] img                          { border-radius: 8px !important; border: 1px solid rgba(255,255,255,0.07) !important; max-height: 130px !important; object-fit: contain !important; }
-
-/* ── SECTION LABELS (e.g. "QUICK ACTIONS") ── */
-.section-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.2);
-    margin-bottom: 7px;
+[data-testid="stFileUploader"] button                {
+    background: rgba(249,115,22,0.09) !important;
+    border: 1px solid rgba(249,115,22,0.2) !important;
+    color: #f97316 !important;
+    border-radius: 5px !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.02em !important;
+}
+[data-testid="stFileUploaderDropzoneInstructions"]   {
+    font-size: 11px !important;
+    color: rgba(255,255,255,0.18) !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+}
+[data-testid="stImage"] img {
+    border-radius: 6px !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    max-height: 130px !important;
+    object-fit: contain !important;
 }
 
-/* ── QUICK ACTION BUTTONS ── */
+/* ── SECTION LABELS ── */
+.section-label {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.18);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+/* ── ALL ACTION BUTTONS ── */
 .stButton > button {
     background: rgba(255,255,255,0.03) !important;
     border: 1px solid rgba(255,255,255,0.07) !important;
-    color: #fff !important;
-    border-radius: 7px !important;
-    font-family: 'Inter', sans-serif !important;
-    font-size: 11px !important;
-    padding: 7px 10px !important;
+    color: rgba(255,255,255,0.75) !important;
+    border-radius: 6px !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    letter-spacing: 0em !important;
+    padding: 10px 10px !important;
     width: 100% !important;
-    transition: all 0.15s !important;
-    text-align: left !important;
+    transition: all 0.12s !important;
+    text-align: center !important;
 }
 .stButton > button:hover {
-    background: rgba(249,115,22,0.08) !important;
-    border-color: rgba(249,115,22,0.25) !important;
+    background: rgba(249,115,22,0.07) !important;
+    border-color: rgba(249,115,22,0.22) !important;
     color: #f97316 !important;
 }
 
-/* Primary "Analyze →" submit button */
+/* Primary "Analyze" submit button */
 .stButton > button[kind="primary"] {
     background: #f97316 !important;
     border: none !important;
     color: #fff !important;
     font-weight: 600 !important;
-    font-size: 14px !important;
-    border-radius: 10px !important;
+    font-size: 13px !important;
+    letter-spacing: 0.02em !important;
+    border-radius: 6px !important;
     text-align: center !important;
     padding: 13px !important;
 }
@@ -600,44 +630,46 @@ html, body { overflow-y: auto; }
 .msg-row.user { justify-content: flex-end; }
 .msg-row.ai   { justify-content: flex-start; gap: 12px; align-items: flex-start; }
 
-/* User message bubble (right side, orange tint) */
 .bubble-user {
-    background: rgba(249,115,22,0.11);
-    border: 1px solid rgba(249,115,22,0.2);
-    border-radius: 18px 18px 4px 18px;
-    padding: 11px 15px;
+    background: rgba(249,115,22,0.09);
+    border: 1px solid rgba(249,115,22,0.18);
+    border-radius: 14px 14px 3px 14px;
+    padding: 11px 16px;
     max-width: 72%;
-    font-size: 14px;
-    color: #fff;
+    font-size: 13px;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: rgba(255,255,255,0.9);
     line-height: 1.65;
 }
 
-/* AI avatar circle icon */
 .ai-avatar {
-    width: 28px; height: 28px;
+    width: 26px; height: 26px;
     flex-shrink: 0;
-    background: rgba(249,115,22,0.12);
-    border: 1px solid rgba(249,115,22,0.2);
+    background: rgba(249,115,22,0.1);
+    border: 1px solid rgba(249,115,22,0.18);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f97316;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     margin-top: 2px;
+    letter-spacing: -0.04em;
 }
 
-/* AI response text area */
-.bubble-ai  { max-width: 88%; font-size: 14px; color: #fff; line-height: 1.7; }
+.bubble-ai  { max-width: 88%; font-size: 13px; color: rgba(255,255,255,0.85); line-height: 1.7; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
 
-/* Empty chat placeholder */
 .chat-empty {
     text-align: center;
     padding: 60px 0 40px;
-    color: rgba(255,255,255,0.12);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.1);
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
+    font-weight: 500;
 }
 
 /* ── STICKY BOTTOM INPUT BAR ── */
@@ -646,83 +678,152 @@ html, body { overflow-y: auto; }
     bottom: 0; left: 0; right: 0;
     height: 90px;
 }
-.sticky-inner { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+.sticky-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; }
 
-/* Chat text area input */
 .stTextArea textarea {
-    background: rgba(255,255,255,0.05) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 12px !important;
-    color: #fff !important;
-    font-family: 'Inter', sans-serif !important;
-    font-size: 14px !important;
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 8px !important;
+    color: rgba(255,255,255,0.9) !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+    font-size: 13px !important;
     padding: 12px 16px !important;
     resize: none !important;
     line-height: 1.6 !important;
+    letter-spacing: 0em !important;
 }
-.stTextArea textarea:focus        { border-color: rgba(249,115,22,0.45) !important; box-shadow: 0 0 0 3px rgba(249,115,22,0.07) !important; outline: none !important; }
-.stTextArea textarea::placeholder { color: rgba(255,255,255,0.2) !important; }
+.stTextArea textarea:focus        { border-color: rgba(249,115,22,0.4) !important; box-shadow: 0 0 0 3px rgba(249,115,22,0.06) !important; outline: none !important; }
+.stTextArea textarea::placeholder { color: rgba(255,255,255,0.18) !important; }
 .stTextArea label                 { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 
 /* ── PDF DOWNLOAD BUTTON ── */
 .stDownloadButton button {
-    background: rgba(255,255,255,0.05) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    color: #fff !important;
-    border-radius: 10px !important;
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.09) !important;
+    color: rgba(255,255,255,0.7) !important;
+    border-radius: 6px !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
     font-size: 12px !important;
     padding: 13px 8px !important;
     width: 100% !important;
-    font-weight: 500 !important;
+    font-weight: 400 !important;
 }
 .stDownloadButton button:hover {
-    background: rgba(249,115,22,0.1) !important;
-    border-color: rgba(249,115,22,0.3) !important;
+    background: rgba(249,115,22,0.08) !important;
+    border-color: rgba(249,115,22,0.25) !important;
     color: #f97316 !important;
 }
 
-/* ── TEXT INPUT (search bar, tags, notes fields) ── */
+/* ── TEXT INPUT ── */
 .stTextInput input {
-    background: rgba(255,255,255,0.05) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    border-radius: 8px !important;
-    color: #fff !important;
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 6px !important;
+    color: rgba(255,255,255,0.85) !important;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
     font-size: 13px !important;
     padding: 8px 12px !important;
 }
-.stTextInput input:focus { border-color: rgba(249,115,22,0.4) !important; outline: none !important; }
-.stTextInput label       { color: rgba(255,255,255,0.4) !important; font-size: 11px !important; }
+.stTextInput input:focus { border-color: rgba(249,115,22,0.38) !important; outline: none !important; }
+.stTextInput label       { color: rgba(255,255,255,0.35) !important; font-size: 11px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
 
 /* ── DRAWING LIBRARY CARDS ── */
 .lib-card {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 10px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
     padding: 12px 14px;
-    margin-bottom: 10px;
-    transition: border-color 0.15s;
+    margin-bottom: 8px;
+    transition: border-color 0.12s;
 }
-.lib-card:hover { border-color: rgba(249,115,22,0.25); }
-.lib-name       { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 4px; }
-.lib-meta       { font-size: 11px; color: rgba(255,255,255,0.3); font-family: 'JetBrains Mono', monospace; }
-.lib-tag        { display: inline-block; background: rgba(249,115,22,0.1); border: 1px solid rgba(249,115,22,0.2); color: #f97316; font-size: 10px; padding: 2px 7px; border-radius: 20px; margin: 3px 3px 0 0; font-family: 'JetBrains Mono', monospace; }
+.lib-card:hover  { border-color: rgba(249,115,22,0.22); }
+.lib-name        { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 4px; letter-spacing: -0.01em; }
+.lib-meta        { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11px; color: rgba(255,255,255,0.25); }
+.lib-tag         { display: inline-block; background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.18); color: rgba(249,115,22,0.85); font-size: 10px; padding: 2px 7px; border-radius: 4px; margin: 3px 3px 0 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 500; letter-spacing: 0.02em; }
 
 /* ── ALERTS AND SPINNER ── */
-[data-testid="stAlert"]     { background: rgba(249,115,22,0.07) !important; border: 1px solid rgba(249,115,22,0.18) !important; border-radius: 8px !important; font-size: 13px !important; }
-[data-testid="stSpinner"] p { color: rgba(255,255,255,0.25) !important; font-size: 12px !important; }
+[data-testid="stAlert"]     { background: rgba(249,115,22,0.06) !important; border: 1px solid rgba(249,115,22,0.15) !important; border-radius: 6px !important; font-size: 12px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
+[data-testid="stSpinner"] p { color: rgba(255,255,255,0.22) !important; font-size: 11px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
 
 /* ── FOOTER CREDIT ── */
-.footer-txt      { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: rgba(255,255,255,0.1); text-align: center; padding: 4px 0 2px; }
+.footer-txt      { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 9px; color: rgba(255,255,255,0.12); text-align: center; padding: 4px 0 2px; letter-spacing: 0.06em; text-transform: uppercase; }
 .footer-txt span { color: #f97316; }
+
+/* ── SPLASH SCREEN ── */
+#draft-ai-splash {
+    position: fixed;
+    inset: 0;
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 999999;
+    animation: splashFade 0.5s ease 2.8s forwards;
+}
+@keyframes splashFade {
+    from { opacity: 1; pointer-events: all; }
+    to   { opacity: 0; pointer-events: none; }
+}
+.splash-title {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: #fff;
+    margin-bottom: 10px;
+}
+.splash-title span { color: #f97316; }
+.splash-sub {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.3);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    animation: splashSubFade 0.6s ease 0.4s both;
+}
+@keyframes splashSubFade {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.splash-bar-wrap {
+    margin-top: 40px;
+    width: 160px;
+    height: 2px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.splash-bar {
+    height: 100%;
+    background: #f97316;
+    border-radius: 2px;
+    animation: splashBarFill 2.6s ease forwards;
+}
+@keyframes splashBarFill {
+    from { width: 0%; }
+    to   { width: 100%; }
+}
 
 </style>
 """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
-# SESSION STATE — Initialize all variables on first load
+# SPLASH SCREEN — shown for 3 seconds on first load
 # ══════════════════════════════════════════════════════════════════
+
+if "splash_shown" not in st.session_state:
+    st.session_state.splash_shown = True
+    st.markdown("""
+<div id="draft-ai-splash">
+    <div class="splash-title">Draft <span>AI</span></div>
+    <div class="splash-sub">Get your design analysis in seconds</div>
+    <div class="splash-bar-wrap"><div class="splash-bar"></div></div>
+</div>
+""", unsafe_allow_html=True)
 
 for k, v in [
     ("chat_history",         []),
@@ -730,6 +831,8 @@ for k, v in [
     ("current_drawing_name", None),
     ("title_block_data",     None),
     ("active_tab",           "analyze"),
+    ("show_revision_panel",  False), 
+    ("uploader_key",         0),  # Toggle for revision comparison UI
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -745,15 +848,15 @@ if "saved_chats" not in st.session_state:
 with st.sidebar:
 
     # App branding
-    st.markdown('<div class="sb-logo">🧠 DraftIQ</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True)
     st.markdown('<div class="sb-sub">by Rishi</div>', unsafe_allow_html=True)
 
     # Navigation tab switcher
     st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
-    if st.button("💬  Analyze", use_container_width=True):
+    if st.button("Analyze Drawing", use_container_width=True):
         st.session_state.active_tab = "analyze"
         st.rerun()
-    if st.button("📚  Library", use_container_width=True):
+    if st.button("Drawing Library", use_container_width=True):
         st.session_state.active_tab = "library"
         st.rerun()
 
@@ -763,11 +866,13 @@ with st.sidebar:
     st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
 
     # New chat — clears current session
-    if st.button("＋  New Chat", use_container_width=True):
-        st.session_state.chat_history         = []
-        st.session_state.messages_display     = []
-        st.session_state.current_drawing_name = None
-        st.session_state.title_block_data     = None
+    if st.button("+ New Chat", use_container_width=True):
+        st.session_state.chat_history          = []
+        st.session_state.messages_display      = []
+        st.session_state.current_drawing_name  = None
+        st.session_state.title_block_data      = None
+        st.session_state.current_drawing_image = None
+        st.session_state.uploader_key         += 1
         st.rerun()
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
@@ -783,7 +888,7 @@ with st.sidebar:
         for name in reversed(list(st.session_state.saved_chats.keys())):
             cb, cd = st.columns([5, 1])
             with cb:
-                if st.button(f"📐 {name[:22]}", key=f"load_{name}"):
+                if st.button(f"{name[:22]}", key=f"load_{name}"):
                     s = st.session_state.saved_chats[name]
                     st.session_state.messages_display      = s["messages_display"]
                     st.session_state.chat_history          = s["chat_history"]
@@ -823,11 +928,11 @@ with nav_col1:
     </style>""", unsafe_allow_html=True)
 
 with nav_col2:
-    # "Draft" in white, "IQ" in orange
+    # Spinning gear + "Draft" in white, "AI" in orange
     st.markdown("""
-<div style="display:flex; align-items:center; gap:6px; margin-left:0px; margin-top:4px;">
-    <span style="font-size:26px;">🧠</span>
-    <span style="font-size:28px; font-weight:700; color:#fff;">Draft</span><span style="font-size:28px; font-weight:700; color:#f97316;">IQ</span>
+<div style="display:flex; align-items:center; gap:10px; margin-left:0px; margin-top:4px;">
+    <span class="gear-spin" style="font-size:28px; line-height:1;">⚙️</span>
+    <span style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:30px; font-weight:700; color:#fff; letter-spacing:-0.04em;">Draft</span><span style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:30px; font-weight:700; color:#f97316; letter-spacing:-0.04em;"> AI</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -851,18 +956,18 @@ if st.session_state.active_tab == "library":
         is_valid, _ = validate_file(add_file)
 
         if size_mb > MAX_FILE_SIZE_MB:
-            st.error(f"❌ File too large ({size_mb:.1f} MB). Max is {MAX_FILE_SIZE_MB} MB.")
+            st.error(f"File too large ({size_mb:.1f} MB). Max is {MAX_FILE_SIZE_MB} MB.")
         elif not is_valid:
-            st.error("❌ Invalid file type. Only real PNG/JPEG/WEBP images accepted.")
+            st.error("Invalid file type. Only real PNG/JPEG/WEBP images accepted.")
         else:
             col_tag, col_note = st.columns([1, 1])
             with col_tag:
                 tags = st.text_input("Tags (comma separated)", placeholder="shaft, tolerance, Rev-A", key="lib_tags")
             with col_note:
                 notes = st.text_input("Notes (optional)", placeholder="Customer drawing, pending review", key="lib_notes")
-            if st.button("➕  Save to Library", type="primary", use_container_width=True):
+            if st.button("Save to Library", type="primary", use_container_width=True):
                 uid = add_to_library(add_file, tags, notes)
-                st.success(f"✅ Saved: {add_file.name}")
+                st.success(f"Saved: {add_file.name}")
                 st.rerun()
 
     st.markdown("<div style='height:1px;background:rgba(255,255,255,0.05);margin:14px 0'></div>", unsafe_allow_html=True)
@@ -915,7 +1020,7 @@ if st.session_state.active_tab == "library":
 
                 with c1:
                     # Open drawing in Analyze tab
-                    if st.button("🔍 Open & Analyze", key=f"open_{uid}", use_container_width=True):
+                    if st.button("Open & Analyze", key=f"open_{uid}", use_container_width=True):
                         try:
                             with open(meta["path"], "rb") as f:
                                 img_bytes = f.read()
@@ -939,16 +1044,16 @@ if st.session_state.active_tab == "library":
                         with open(meta["path"], "rb") as f:
                             file_bytes = f.read()
                         st.download_button(
-                            "⬇️ Download", data=file_bytes,
+                            "Download", data=file_bytes,
                             file_name=meta["name"],
                             use_container_width=True, key=f"dl_{uid}",
                         )
                     except:
-                        st.button("⬇️ Download", disabled=True, use_container_width=True, key=f"dl_{uid}")
+                        st.button("Download", disabled=True, use_container_width=True, key=f"dl_{uid}")
 
                 with c3:
                     # Delete from library
-                    if st.button("🗑️", key=f"libdel_{uid}", use_container_width=True, help="Remove from library"):
+                    if st.button("Clear", key=f"libdel_{uid}", use_container_width=True, help="Remove from library"):
                         delete_from_library(uid)
                         st.rerun()
 
@@ -961,26 +1066,28 @@ if st.session_state.active_tab == "library":
 
 else:
 
-    # ── Show previously loaded drawing image (from saved chat) ──
-    if st.session_state.get("current_drawing_image"):
-        img = base64.b64decode(st.session_state.current_drawing_image)
-        st.image(img, width=180)
-
     # ── File uploader ──
     uploaded_file = st.file_uploader(
         "upload", type=["png","jpg","jpeg","webp"],
         label_visibility="collapsed",
+        key=f"uploader_{st.session_state.uploader_key}",
     )
+
+    # ── Show cached image only when no file is currently uploaded ──
+    if not uploaded_file and st.session_state.get("current_drawing_image"):
+        img = base64.b64decode(st.session_state.current_drawing_image)
+        st.image(img, width=180)
+
     file_ok = False
 
     if uploaded_file:
         size_mb = check_file_size(uploaded_file)
         if size_mb > MAX_FILE_SIZE_MB:
-            st.error(f"❌ File too large: {size_mb:.1f} MB. Maximum is {MAX_FILE_SIZE_MB} MB.")
+            st.error(f"File too large: {size_mb:.1f} MB. Maximum is {MAX_FILE_SIZE_MB} MB.")
         else:
             is_valid, _ = validate_file(uploaded_file)
             if not is_valid:
-                st.error("❌ Invalid file. Only real PNG, JPEG, and WEBP images accepted.")
+                st.error("Invalid file. Only real PNG, JPEG, and WEBP images accepted.")
             else:
                 file_ok = True
             st.image(uploaded_file, width=180)
@@ -993,21 +1100,56 @@ else:
             st.session_state.current_drawing_image = base64.b64encode(img_bytes).decode("utf-8")
             uploaded_file.seek(0)
 
-    # ── Quick action buttons (2 rows × 4 columns) ──
+    # ── Quick action buttons — Row 1: original 8 features ──
     st.markdown('<div class="section-label" style="margin-top:10px;">Quick Actions</div>', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        q1 = st.button("📏 Dimensions",      use_container_width=True)
-        q5 = st.button("📋 Summarize",       use_container_width=True)
+        q1 = st.button("Dimensions",      use_container_width=True)
+        q5 = st.button("Summarize",       use_container_width=True)
     with c2:
-        q2 = st.button("🔬 GD&T Analysis",   use_container_width=True)
-        q6 = st.button("⚠️ Design Concerns", use_container_width=True)
+        q2 = st.button("GD&T Analysis",   use_container_width=True)
+        q6 = st.button("Design Concerns", use_container_width=True)
     with c3:
-        q3 = st.button("🔩 Material Rec.",   use_container_width=True)
-        q7 = st.button("🏭 Manufacturing",   use_container_width=True)
+        q3 = st.button("Material Rec.",   use_container_width=True)
+        q7 = st.button("Manufacturing",   use_container_width=True)
     with c4:
-        q4 = st.button("🏷️ Title Block",     use_container_width=True)
-        q8 = st.button("📐 View type",       use_container_width=True)
+        q4 = st.button("Title Block",     use_container_width=True)
+        q8 = st.button("View Type",       use_container_width=True)
+
+    # ── Advanced Features — Row 2: 5 new features ──
+    st.markdown('<div class="section-label" style="margin-top:20px;">Advanced Analysis</div>', unsafe_allow_html=True)
+    a1, a2, a3, a4, a5 = st.columns(5)
+    with a1:
+        qa1 = st.button("Tolerance Analysis",     use_container_width=True, help="Analyse dimensional chains and worst-case fits")
+    with a2:
+        qa2 = st.button("DFM Analysis",            use_container_width=True, help="Score manufacturability 0-100 with breakdown")
+    with a3:
+        qa3 = st.button("Cost Breakdown",          use_container_width=True, help="Rough per-unit cost estimate across volumes")
+    with a4:
+        qa4 = st.button("Dimensional Check",     use_container_width=True, help="Find missing dimensions, tolerances & annotations")
+    with a5:
+        qa5 = st.button("Revision Diff",      use_container_width=True, help="Upload a second drawing to compare revisions")
+
+    # ── Revision comparison panel (shown only when Compare Revisions is active) ──
+    rev_file_b = None
+    if qa5:
+        st.session_state.show_revision_panel = not st.session_state.show_revision_panel
+
+    if st.session_state.show_revision_panel:
+        st.markdown(
+            '<div style="background:rgba(249,115,22,0.05);border:1px solid rgba(249,115,22,0.2);'
+            'border-radius:10px;padding:12px 16px;margin:8px 0;">'
+            '<div style="font-size:11px;color:#f97316;font-family:JetBrains Mono,monospace;'
+            'letter-spacing:1px;margin-bottom:8px;">REVISION COMPARISON — upload Rev B below</div>',
+            unsafe_allow_html=True,
+        )
+        rev_file_b = st.file_uploader(
+            "Upload Revision B",
+            type=["png", "jpg", "jpeg", "webp"],
+            label_visibility="collapsed",
+            key="rev_b_uploader",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("<div style='height:1px;background:rgba(255,255,255,0.05);margin:12px 0'></div>", unsafe_allow_html=True)
 
@@ -1015,7 +1157,7 @@ else:
     if not st.session_state.messages_display:
         # Empty state
         st.markdown("""<div class="chat-empty">
-            <div style="font-size:34px;opacity:0.15;margin-bottom:8px;">🧠</div>
+            <div style="font-size:34px;opacity:1;margin-bottom:8px;">⚙️</div>
             <div style="color:#ffffff;">Upload a drawing and start asking</div>
         </div>""", unsafe_allow_html=True)
     else:
@@ -1032,7 +1174,7 @@ else:
                 if content.startswith("__TB__"):
                     bubble = render_title_block(content[6:])
                     st.markdown(
-                        f'<div class="msg-row ai"><div class="ai-avatar">🧠</div>'
+                        f'<div class="msg-row ai"><div class="ai-avatar">⚙️</div>'
                         f'<div class="bubble-ai" style="max-width:90%;">{bubble}</div></div>',
                         unsafe_allow_html=True,
                     )
@@ -1040,21 +1182,21 @@ else:
                 elif content.startswith("__DIM__"):
                     bubble = render_dim_table(content[7:])
                     st.markdown(
-                        f'<div class="msg-row ai"><div class="ai-avatar">🧠</div>'
+                        f'<div class="msg-row ai"><div class="ai-avatar">⚙️</div>'
                         f'<div class="bubble-ai" style="max-width:95%;">{bubble}</div></div>',
                         unsafe_allow_html=True,
                     )
                 # Standard AI text response
                 else:
                     st.markdown(
-                        f'<div class="msg-row ai"><div class="ai-avatar">🧠</div>'
+                        f'<div class="msg-row ai"><div class="ai-avatar">⚙️</div>'
                         f'<div class="bubble-ai">{fmt(content)}</div></div>',
                         unsafe_allow_html=True,
                     )
 
     # Footer credit line
     st.markdown(
-        '<div class="footer-txt" style="margin-bottom:8px;color:#ffffff;">Made with <span>♥️</span> by Rishi · DraftIQ</div>',
+        '<div class="footer-txt" style="margin-bottom:8px;color:#ffffff;">Draft AI &mdash;Made With ♥️ by Rishi</div>',
         unsafe_allow_html=True,
     )
 
@@ -1065,13 +1207,13 @@ else:
         "msg", placeholder="Ask anything about the drawing...",
         label_visibility="collapsed", height=52,
     )
-    col_ask, col_clear, col_pdf = st.columns([4, 1, 1], gap="small")
+    col_ask, col_clear, col_pdf = st.columns([4, 0.9, 1], gap="small")
 
     with col_ask:
-        ask_btn = st.button("Analyze →", type="primary", use_container_width=True)
+        ask_btn = st.button("Analyze", type="primary", use_container_width=True)
 
     with col_clear:
-        if st.button("🗑️", use_container_width=True, help="Clear chat"):
+        if st.button("🗑️Clear", use_container_width=True, help="Clear chat"):
             st.session_state.chat_history     = []
             st.session_state.messages_display = []
             st.rerun()
@@ -1084,13 +1226,13 @@ else:
                 title_block_data=st.session_state.title_block_data,
             )
             st.download_button(
-                "📄 PDF", data=pdf_buf,
+                "📄Export PDF", data=pdf_buf,
                 file_name="drawing_analysis.pdf",
                 mime="application/pdf",
                 use_container_width=True,
             )
         else:
-            st.button("📄 PDF", disabled=True, use_container_width=True)
+            st.button("📄Export PDF", disabled=True, use_container_width=True)
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
@@ -1102,28 +1244,36 @@ else:
     question       = None
     special_action = None
 
-    if   q1: special_action = "dimensions"
-    elif q2: special_action = "gdt"
-    elif q3: special_action = "material"
-    elif q4: special_action = "titleblock"
-    elif q5: question = "Give a comprehensive summary: drawing type, component description, key dimensions, materials, and special requirements."
-    elif q6: special_action = "design"
-    elif q7: special_action = "manufacturing"
-    elif q8: question = "Identify all views shown (front, side, top, isometric, section etc.) and explain what each view reveals about the component."
+    if   q1:  special_action = "dimensions"
+    elif q2:  special_action = "gdt"
+    elif q3:  special_action = "material"
+    elif q4:  special_action = "titleblock"
+    elif q5:  question = "Give a comprehensive summary: drawing type, component description, key dimensions, materials, and special requirements."
+    elif q6:  special_action = "design"
+    elif q7:  special_action = "manufacturing"
+    elif q8:  question = "Identify all views shown (front, side, top, isometric, section etc.) and explain what each view reveals about the component."
+    elif qa1: special_action = "tolerance_stackup"
+    elif qa2: special_action = "mfg_score"
+    elif qa3: special_action = "cost_estimate"
+    elif qa4: special_action = "missing_dims"
     elif ask_btn and custom_q:     question = custom_q
     elif ask_btn and not custom_q: st.warning("Please type a question first.")
 
     # Spinner messages and user-facing labels per action
     ACTION_MAP = {
-        "dimensions":    ("📏 Detecting dimensions...",           "📏 Dimension Detection"),
-        "gdt":           ("🔬 Analyzing GD&T symbols...",         "🔬 GD&T Analysis"),
-        "design":        ("⚠️ Reviewing design concerns...",      "⚠️ Design Concern Review"),
-        "material":      ("🔩 Generating material analysis...",   "🔩 Material Recommendation"),
-        "manufacturing": ("🏭 Analyzing manufacturing methods...", "🏭 Manufacturing Suggestions"),
-        "titleblock":    ("🏷️ Reading title block...",            "🏷️ Title Block"),
+        "dimensions":       ("Detecting dimensions...",            "Dimension Detection"),
+        "gdt":              ("Analyzing GD&T...",          "GD&T Analysis"),
+        "design":           ("Reviewing design concerns...",       "Design Concern Review"),
+        "material":         ("Generating material analysis...",    "Material Recommendation"),
+        "manufacturing":    ("Analyzing manufacturing methods...", "Manufacturing Suggestions"),
+        "titleblock":       ("Reading title block...",             "Title Block"),
+        "tolerance_stackup":("Calculating tolerance stack-up...",  "Tolerance Stack-Up Analysis"),
+        "mfg_score":        ("Scoring manufacturability...",       "Manufacturability Score"),
+        "cost_estimate":    ("Estimating part cost...",            "Cost Estimation"),
+        "missing_dims":     ("Checking for missing dimensions...", "Missing Dimension Detection"),
     }
 
-    # ── Special action handler (GD&T, Dimensions, Material, etc.) ──
+    # ── Special action handler ──
     if special_action:
         if not uploaded_file or not file_ok:
             st.warning("Please upload a valid engineering drawing first.")
@@ -1131,16 +1281,20 @@ else:
             ip = get_client_ip()
             allowed, _ = check_rate_limit(ip)
             if not allowed:
-                st.error("❌ Rate limit reached: 2 requests/hour. Please try again later.")
+                st.error("Rate limit reached: 2 requests/hour. Please try again later.")
             else:
                 spinner_msg, user_label = ACTION_MAP[special_action]
                 with st.spinner(spinner_msg):
                     uploaded_file.seek(0)
-                    if   special_action == "dimensions":    result = detect_dimensions(uploaded_file)
-                    elif special_action == "gdt":           result = analyze_gdt(uploaded_file)
-                    elif special_action == "design":        result = analyze_design_concerns(uploaded_file)
-                    elif special_action == "material":      result = analyze_material(uploaded_file)
-                    elif special_action == "manufacturing": result = analyze_manufacturing(uploaded_file)
+                    if   special_action == "dimensions":        result = detect_dimensions(uploaded_file)
+                    elif special_action == "gdt":               result = analyze_gdt(uploaded_file)
+                    elif special_action == "design":            result = analyze_design_concerns(uploaded_file)
+                    elif special_action == "material":          result = analyze_material(uploaded_file)
+                    elif special_action == "manufacturing":     result = analyze_manufacturing(uploaded_file)
+                    elif special_action == "tolerance_stackup": result = analyze_tolerance_stackup(uploaded_file)
+                    elif special_action == "mfg_score":         result = analyze_manufacturability_score(uploaded_file)
+                    elif special_action == "cost_estimate":     result = estimate_cost(uploaded_file)
+                    elif special_action == "missing_dims":      result = detect_missing_dimensions(uploaded_file)
                     elif special_action == "titleblock":
                         result = extract_title_block(uploaded_file)
                         st.session_state.title_block_data = result
@@ -1158,6 +1312,36 @@ else:
                 persist_chat()
                 st.rerun()
 
+    # ── Revision comparison handler (needs two files) ──
+    if st.session_state.show_revision_panel and rev_file_b:
+        if not uploaded_file or not file_ok:
+            st.warning("Please upload the primary drawing (Rev A) using the upload box above first.")
+        else:
+            rev_size = check_file_size(rev_file_b)
+            rev_valid, _ = validate_file(rev_file_b)
+            if rev_size > MAX_FILE_SIZE_MB:
+                st.error(f"Rev B file too large: {rev_size:.1f} MB.")
+            elif not rev_valid:
+                st.error("❌ Invalid Rev B file. Only PNG, JPEG, WEBP accepted.")
+            else:
+                ip = get_client_ip()
+                allowed, _ = check_rate_limit(ip)
+                if not allowed:
+                    st.error("Rate limit reached: 2 requests/hour. Please try again later.")
+                else:
+                    with st.spinner("Comparing revisions..."):
+                        uploaded_file.seek(0)
+                        rev_file_b.seek(0)
+                        result = compare_revisions(uploaded_file, rev_file_b)
+                    increment_rate_limit(ip)
+
+                    st.session_state.messages_display.append({"role": "user", "content": f"🔄 Compare Revisions: {uploaded_file.name} vs {rev_file_b.name}"})
+                    st.session_state.messages_display.append({"role": "ai",   "content": result})
+                    st.session_state.chat_history.append(    {"role": "user",      "content": "Compare drawing revisions"})
+                    st.session_state.chat_history.append(    {"role": "assistant", "content": result})
+                    st.session_state.show_revision_panel = False
+                    persist_chat()
+                    st.rerun()
     # ── Free-text question handler ──
     if question:
         if not uploaded_file or not file_ok:
