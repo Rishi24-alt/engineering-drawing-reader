@@ -54,7 +54,7 @@ Path(LIBRARY_DIR).mkdir(exist_ok=True)
 def validate_file(f):
     """
     Validate uploaded file using magic bytes (not just file extension).
-    Supports PNG, JPEG, and WEBP formats.
+    Supports PNG, JPEG, WEBP, and PDF formats.
     Returns (is_valid: bool, file_type: str | None)
     """
     h = f.read(12)
@@ -62,6 +62,7 @@ def validate_file(f):
     if h[:8] == b'\x89PNG\r\n\x1a\n':              return True, "png"
     if h[:3] == b'\xff\xd8\xff':                    return True, "jpeg"
     if h[:4] == b'RIFF' and h[8:12] == b'WEBP':    return True, "webp"
+    if h[:4] == b'%PDF':                            return True, "pdf"
     return False, None
 
 
@@ -1332,22 +1333,39 @@ else:
         if size_mb > MAX_FILE_SIZE_MB:
             st.error(f"File too large: {size_mb:.1f} MB. Maximum is {MAX_FILE_SIZE_MB} MB.")
         else:
-            is_valid, _ = validate_file(uploaded_file)
+            is_valid, file_type = validate_file(uploaded_file)
             if not is_valid:
-                st.error("Invalid file. Only real PNG, JPEG, and WEBP images accepted.")
+                st.error("Invalid file. Only PNG, JPEG, WEBP, and PDF files accepted.")
+            elif file_type == "pdf":
+                # Convert PDF → PNG before preview and analysis
+                with st.spinner("Converting PDF drawing to image..."):
+                    ok, result = pdf_to_image_bytes(uploaded_file)
+                if not ok:
+                    st.error(f"Could not convert PDF: {result}")
+                else:
+                    import io as _io
+                    png_buf      = _io.BytesIO(result)
+                    png_buf.name = uploaded_file.name.rsplit(".", 1)[0] + ".png"
+                    uploaded_file = png_buf
+                    file_ok = True
+                    st.success("PDF converted — analyzing first page.")
+
+                    uploaded_file.seek(0)
+                    img_bytes = uploaded_file.read()
+                    uploaded_file.seek(0)
+                    render_drawing_preview(img_bytes, uploaded_file.name)
+                    st.session_state.current_drawing_name = uploaded_file.name
+                    import base64
+                    st.session_state.current_drawing_image = base64.b64encode(img_bytes).decode("utf-8")
             else:
                 file_ok = True
-
-            uploaded_file.seek(0)
-            img_bytes = uploaded_file.read()
-            uploaded_file.seek(0)
-
-            render_drawing_preview(img_bytes, uploaded_file.name)
-            st.session_state.current_drawing_name = uploaded_file.name
-
-            # Cache image as base64 for session persistence across reruns
-            import base64
-            st.session_state.current_drawing_image = base64.b64encode(img_bytes).decode("utf-8")
+                uploaded_file.seek(0)
+                img_bytes = uploaded_file.read()
+                uploaded_file.seek(0)
+                render_drawing_preview(img_bytes, uploaded_file.name)
+                st.session_state.current_drawing_name = uploaded_file.name
+                import base64
+                st.session_state.current_drawing_image = base64.b64encode(img_bytes).decode("utf-8")
 
     # -- Quick action buttons --
     st.markdown('<div class="section-label" style="margin-top:8px;">Quick Analysis</div>', unsafe_allow_html=True)
