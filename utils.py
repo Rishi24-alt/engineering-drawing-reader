@@ -1,18 +1,42 @@
-import openai
 import base64
 import os
-from dotenv import load_dotenv
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
 import io
 from datetime import datetime
 
-load_dotenv()
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+try:
+    import openai
+except ImportError:
+    openai = None
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+except ImportError:
+    A4 = colors = ParagraphStyle = mm = SimpleDocTemplate = Paragraph = Spacer = HRFlowable = Table = TableStyle = TA_LEFT = TA_CENTER = None
+
+if load_dotenv:
+    load_dotenv()
+
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if openai else None
+
+
+def _require_openai():
+    if client is None:
+        raise RuntimeError("OpenAI dependency is unavailable. Install the 'openai' package and redeploy.")
+
+
+def _require_reportlab():
+    if SimpleDocTemplate is None:
+        raise RuntimeError("PDF generation dependency is unavailable. Install 'reportlab' and redeploy.")
 
 # ── BASE FORMATTING RULES (shared by all prompts) ──
 FORMAT_RULES = """
@@ -152,6 +176,7 @@ ESTIMATED PRODUCTION NOTES:
 
 def _call_vision_api(image_file, system_prompt, user_message, max_tokens=1400):
     """Internal helper — single place where we call the API. No debug prints."""
+    _require_openai()
     base64_image = base64.b64encode(image_file.read()).decode("utf-8")
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -175,6 +200,7 @@ def _call_vision_api(image_file, system_prompt, user_message, max_tokens=1400):
 
 def _call_vision_api_with_history(image_file, system_prompt, question, chat_history, max_tokens=1400):
     """Vision API call with conversation history."""
+    _require_openai()
     base64_image = base64.b64encode(image_file.read()).decode("utf-8")
     messages = [{"role": "system", "content": system_prompt}]
     for msg in chat_history:
@@ -795,6 +821,7 @@ def generate_batch_excel(results):
 
 def generate_batch_pdf(results):
     """Generate a PDF summary report from batch analysis results."""
+    _require_reportlab()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -876,6 +903,7 @@ def generate_batch_pdf(results):
 
 
 def generate_pdf(messages_display, drawing_name="drawing", title_block_data=None):
+    _require_reportlab()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
