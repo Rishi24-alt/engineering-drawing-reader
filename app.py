@@ -1,8 +1,8 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║                        Draft AI — app.py                        ║
-# ║         AI-powered engineering drawing analysis tool            ║
-# ║                       by Rishi  ·  2025                         ║
-# ╚══════════════════════════════════════════════════════════════════╝
+﻿# +------------------------------------------------------------------+
+# �                        Draft AI � app.py                        �
+# �         AI-powered engineering drawing analysis tool            �
+# �                       by Rishi  �  2025                         �
+# +------------------------------------------------------------------+
 
 import streamlit as st
 from utils import (
@@ -14,7 +14,7 @@ from utils import (
     analyze_material,
     analyze_manufacturing,
     detect_dimensions,
-    # ── 5 new features ──
+    # -- 5 new features --
     analyze_tolerance_stackup,
     analyze_manufacturability_score,
     estimate_cost,
@@ -26,9 +26,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 # CONSTANTS
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 CHATS_FILE          = "saved_chats.json"     # Persisted chat sessions
 RATE_LIMIT_FILE     = "rate_limits.json"     # Per-IP request tracking
@@ -43,9 +43,9 @@ MAX_REQUESTS_PER_IP = 2    # Max AI requests per hour per user
 Path(LIBRARY_DIR).mkdir(exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════════════
-# SECURITY — File validation & rate limiting
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# SECURITY � File validation & rate limiting
+# ------------------------------------------------------------------
 
 def validate_file(f):
     """
@@ -129,9 +129,9 @@ def increment_rate_limit(ip):
     save_rate_limits(lim)
 
 
-# ══════════════════════════════════════════════════════════════════
-# DRAWING LIBRARY — Save, load, search, delete drawings
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# DRAWING LIBRARY � Save, load, search, delete drawings
+# ------------------------------------------------------------------
 
 def load_library():
     """Load drawing library metadata from disk."""
@@ -192,9 +192,9 @@ def delete_from_library(uid):
         save_library(lib)
 
 
-# ══════════════════════════════════════════════════════════════════
-# CHAT PERSISTENCE — Save and restore chat sessions
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# CHAT PERSISTENCE � Save and restore chat sessions
+# ------------------------------------------------------------------
 
 def load_chats():
     """Load saved chat sessions from disk."""
@@ -231,9 +231,9 @@ def persist_chat():
     save_chats(st.session_state.saved_chats)
 
 
-# ══════════════════════════════════════════════════════════════════
-# MESSAGE FORMATTER — Convert AI text to styled HTML bubbles
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# MESSAGE FORMATTER � Convert AI text to styled HTML bubbles
+# ------------------------------------------------------------------
 
 def fmt(text):
     """
@@ -270,13 +270,13 @@ def fmt(text):
             item  = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', item)
             html += f'<li style="margin-bottom:4px;line-height:1.7;font-size:14px;">{item}</li>'
 
-        # Unordered list (- or •)
-        elif s.startswith("- ") or s.startswith("• ") or re.match(r'^[•○◦]\s', s):
+        # Unordered list (- or �)
+        elif s.startswith("- ") or s.startswith("� ") or re.match(r'^[⚙️]\s', s):
             if in_list != "ul":
                 if in_list: html += f'</{in_list}>'
                 html   += '<ul style="margin:4px 0 4px 20px;padding:0;color:#fff;">'
                 in_list = "ul"
-            item  = re.sub(r'^[-•○◦]\s*', '', s)
+            item  = re.sub(r'^[-⚙️]\s*', '', s)
             item  = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', item)
             html += f'<li style="margin-bottom:4px;line-height:1.7;font-size:14px;">{item}</li>'
 
@@ -310,12 +310,12 @@ def render_dim_table(json_str):
         rows = ""
         for i, d in enumerate(dims):
             bg       = "rgba(255,255,255,0.02)" if i % 2 == 0 else "rgba(255,255,255,0.04)"
-            label    = str(d.get("label",     "—"))
-            value    = str(d.get("value",     "—"))
-            unit     = str(d.get("unit",      "—"))
-            tol      = str(d.get("tolerance", "—"))
-            location = str(d.get("location",  "—"))
-            dtype    = str(d.get("type",      "—"))
+            label    = str(d.get("label",     "�"))
+            value    = str(d.get("value",     "�"))
+            unit     = str(d.get("unit",      "�"))
+            tol      = str(d.get("tolerance", "�"))
+            location = str(d.get("location",  "�"))
+            dtype    = str(d.get("type",      "�"))
             rows += f'''<tr style="background:{bg};">
                 <td style="padding:7px 12px;color:rgba(255,255,255,0.5);font-size:12px;">{label}</td>
                 <td style="padding:7px 12px;color:#f97316;font-weight:600;font-size:14px;">{value}</td>
@@ -334,7 +334,7 @@ def render_dim_table(json_str):
 
         return f'''<div style="background:rgba(249,115,22,0.04);border:1px solid rgba(249,115,22,0.15);border-radius:10px;overflow:hidden;">
             <div style="padding:8px 14px;font-size:10px;font-family:JetBrains Mono,monospace;color:#f97316;letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid rgba(249,115,22,0.12);">
-                📏 DIMENSIONS DETECTED — {len(dims)} found
+                ?? DIMENSIONS DETECTED � {len(dims)} found
             </div>
             <table style="width:100%;border-collapse:collapse;">
                 <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
@@ -362,7 +362,7 @@ def render_title_block(raw):
         if ":" in line:
             parts = line.split(":", 1)
             k     = parts[0].strip()
-            v     = parts[1].strip() if len(parts) > 1 else "—"
+            v     = parts[1].strip() if len(parts) > 1 else "�"
             if v and v.lower() != "not specified":
                 rows += (
                     f'<tr>'
@@ -376,15 +376,51 @@ def render_title_block(raw):
     return f'''<div style="background:rgba(249,115,22,0.05);border:1px solid rgba(249,115,22,0.18);border-radius:10px;overflow:hidden;">
         <div style="padding:8px 14px;font-size:10px;font-family:JetBrains Mono,monospace;color:#f97316;
                     letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid rgba(249,115,22,0.12);">
-            🏷️ TITLE BLOCK
+            ??? TITLE BLOCK
         </div>
         <table style="width:100%;border-collapse:collapse;">{rows}</table>
     </div>'''
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+@st.dialog("Drawing Preview", width="large")
+def open_drawing_preview(image_bytes):
+    encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;justify-content:center;min-height:78vh;">
+            <img
+                src="data:image/png;base64,{encoded_image}"
+                alt="Drawing preview"
+                style="
+                    max-width:min(92vw, 1400px);
+                    max-height:78vh;
+                    width:auto;
+                    height:auto;
+                    object-fit:contain;
+                    display:block;
+                    margin:0 auto;
+                    border-radius:8px;
+                    border:1px solid rgba(255,255,255,0.06);
+                "
+            />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_drawing_preview(image_bytes, key_suffix):
+    preview_col, action_col = st.columns([3, 1])
+    with preview_col:
+        st.image(image_bytes, width=180)
+    with action_col:
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        if st.button("Enlarge", key=f"enlarge_{key_suffix}", use_container_width=True):
+            open_drawing_preview(image_bytes)
+
 # PAGE CONFIG
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 st.set_page_config(
     page_title="Draft AI",
@@ -394,25 +430,25 @@ st.set_page_config(
 )
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 # GLOBAL CSS STYLES
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 st.markdown("""
 <style>
 
-/* ── FONTS — Professional system stack (Helvetica Neue primary) ── */
+/* -- FONTS � Professional system stack (Helvetica Neue primary) -- */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
-/* ── RESET ── */
+/* -- RESET -- */
 * { box-sizing: border-box; }
 
-/* ── BASE PAGE BACKGROUND ── */
+/* -- BASE PAGE BACKGROUND -- */
 html, body                          { background: #0a0a0a !important; font-family: 'Helvetica Neue', Helvetica, Arial, 'DM Sans', sans-serif; letter-spacing: -0.01em; }
 [data-testid="stAppViewContainer"]  { background: #0a0a0a !important; }
 [data-testid="stMain"]              { background: #0a0a0a !important; overflow-y: auto !important; }
 
-/* ── SUBTLE RADIAL GLOW (decorative background) ── */
+/* -- SUBTLE RADIAL GLOW (decorative background) -- */
 [data-testid="stAppViewContainer"]::before {
     content: '';
     position: fixed;
@@ -425,7 +461,7 @@ html, body                          { background: #0a0a0a !important; font-famil
     z-index: 0;
 }
 
-/* ── MAIN CONTENT CONTAINER ── */
+/* -- MAIN CONTENT CONTAINER -- */
 .block-container {
     max-width: 900px !important;
     margin: 0 auto !important;
@@ -433,10 +469,10 @@ html, body                          { background: #0a0a0a !important; font-famil
     min-height: 100vh !important;
 }
 
-/* ── HIDE STREAMLIT DEFAULT UI (deploy button, menu, footer) ── */
+/* -- HIDE STREAMLIT DEFAULT UI (deploy button, menu, footer) -- */
 .stDeployButton, #MainMenu, footer { display: none !important; }
 
-/* ── SIDEBAR TOGGLE BUTTON ── */
+/* -- SIDEBAR TOGGLE BUTTON -- */
 [data-testid="collapsedControl"] {
     position: fixed !important;
     top: 18px !important;
@@ -458,14 +494,14 @@ html, body                          { background: #0a0a0a !important; font-famil
     height: 18px !important;
 }
 
-/* ── PAGE SCROLL ── */
+/* -- PAGE SCROLL -- */
 html, body { overflow-y: auto; }
 [data-testid="stAppViewContainer"] { overflow-y: auto !important; height: 100vh; }
 
-/* ── STREAMLIT HEADER ── */
+/* -- STREAMLIT HEADER -- */
 [data-testid="stHeader"] { background: transparent !important; }
 
-/* ── SIDEBAR PANEL ── */
+/* -- SIDEBAR PANEL -- */
 [data-testid="stSidebar"] {
     background: #0d0d0d !important;
     border-right: 1px solid rgba(255,255,255,0.04) !important;
@@ -531,11 +567,11 @@ html, body { overflow-y: auto; }
     color: #f97316 !important;
 }
 
-/* ── SPINNING GEAR ANIMATION ── */
+/* -- SPINNING GEAR ANIMATION -- */
 @keyframes spinGear { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .gear-spin { display: inline-block; animation: spinGear 6s linear infinite; }
 
-/* ── TOP NAV BAR ── */
+/* -- TOP NAV BAR -- */
 .top-nav {
     display: flex !important;
     align-items: center !important;
@@ -548,7 +584,7 @@ html, body { overflow-y: auto; }
     z-index: 100;
 }
 
-/* ── FILE UPLOADER ── */
+/* -- FILE UPLOADER -- */
 [data-testid="stFileUploader"] > div {
     border: 1.5px dashed rgba(255,255,255,0.07) !important;
     background: rgba(255,255,255,0.015) !important;
@@ -575,11 +611,13 @@ html, body { overflow-y: auto; }
 [data-testid="stImage"] img {
     border-radius: 6px !important;
     border: 1px solid rgba(255,255,255,0.06) !important;
-    max-height: 130px !important;
     object-fit: contain !important;
 }
+[data-testid="stImage"] button {
+    display: none !important;
+}
 
-/* ── SECTION LABELS ── */
+/* -- SECTION LABELS -- */
 .section-label {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: 9px;
@@ -590,7 +628,7 @@ html, body { overflow-y: auto; }
     font-weight: 600;
 }
 
-/* ── ALL ACTION BUTTONS ── */
+/* -- ALL ACTION BUTTONS -- */
 .stButton > button {
     background: rgba(255,255,255,0.03) !important;
     border: 1px solid rgba(255,255,255,0.07) !important;
@@ -625,7 +663,7 @@ html, body { overflow-y: auto; }
 }
 .stButton > button[kind="primary"]:hover { background: #e86910 !important; }
 
-/* ── CHAT MESSAGES ── */
+/* -- CHAT MESSAGES -- */
 .msg-row      { display: flex; margin-bottom: 20px; }
 .msg-row.user { justify-content: flex-end; }
 .msg-row.ai   { justify-content: flex-start; gap: 12px; align-items: flex-start; }
@@ -672,7 +710,7 @@ html, body { overflow-y: auto; }
     font-weight: 500;
 }
 
-/* ── STICKY BOTTOM INPUT BAR ── */
+/* -- STICKY BOTTOM INPUT BAR -- */
 .sticky-wrap {
     position: fixed;
     bottom: 0; left: 0; right: 0;
@@ -697,7 +735,7 @@ html, body { overflow-y: auto; }
 .stTextArea label                 { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 
-/* ── PDF DOWNLOAD BUTTON ── */
+/* -- PDF DOWNLOAD BUTTON -- */
 .stDownloadButton button {
     background: rgba(255,255,255,0.04) !important;
     border: 1px solid rgba(255,255,255,0.09) !important;
@@ -715,7 +753,7 @@ html, body { overflow-y: auto; }
     color: #f97316 !important;
 }
 
-/* ── TEXT INPUT ── */
+/* -- TEXT INPUT -- */
 .stTextInput input {
     background: rgba(255,255,255,0.04) !important;
     border: 1px solid rgba(255,255,255,0.07) !important;
@@ -728,7 +766,7 @@ html, body { overflow-y: auto; }
 .stTextInput input:focus { border-color: rgba(249,115,22,0.38) !important; outline: none !important; }
 .stTextInput label       { color: rgba(255,255,255,0.35) !important; font-size: 11px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
 
-/* ── DRAWING LIBRARY CARDS ── */
+/* -- DRAWING LIBRARY CARDS -- */
 .lib-card {
     background: rgba(255,255,255,0.025);
     border: 1px solid rgba(255,255,255,0.06);
@@ -742,15 +780,15 @@ html, body { overflow-y: auto; }
 .lib-meta        { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11px; color: rgba(255,255,255,0.25); }
 .lib-tag         { display: inline-block; background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.18); color: rgba(249,115,22,0.85); font-size: 10px; padding: 2px 7px; border-radius: 4px; margin: 3px 3px 0 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 500; letter-spacing: 0.02em; }
 
-/* ── ALERTS AND SPINNER ── */
+/* -- ALERTS AND SPINNER -- */
 [data-testid="stAlert"]     { background: rgba(249,115,22,0.06) !important; border: 1px solid rgba(249,115,22,0.15) !important; border-radius: 6px !important; font-size: 12px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
 [data-testid="stSpinner"] p { color: rgba(255,255,255,0.22) !important; font-size: 11px !important; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important; }
 
-/* ── FOOTER CREDIT ── */
+/* -- FOOTER CREDIT -- */
 .footer-txt      { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 9px; color: rgba(255,255,255,0.12); text-align: center; padding: 4px 0 2px; letter-spacing: 0.06em; text-transform: uppercase; }
 .footer-txt span { color: #f97316; }
 
-/* ── SPLASH SCREEN ── */
+/* -- SPLASH SCREEN -- */
 #draft-ai-splash {
     position: fixed;
     inset: 0;
@@ -811,9 +849,9 @@ html, body { overflow-y: auto; }
 """, unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════
-# SPLASH SCREEN — shown for 3 seconds on first load
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# SPLASH SCREEN � shown for 3 seconds on first load
+# ------------------------------------------------------------------
 
 if "splash_shown" not in st.session_state:
     st.session_state.splash_shown = True
@@ -841,9 +879,9 @@ if "saved_chats" not in st.session_state:
     st.session_state.saved_chats = load_chats()
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 # SIDEBAR
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 with st.sidebar:
 
@@ -865,7 +903,7 @@ with st.sidebar:
     count = len(st.session_state.saved_chats)
     st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
 
-    # New chat — clears current session
+    # New chat � clears current session
     if st.button("+ New Chat", use_container_width=True):
         st.session_state.chat_history          = []
         st.session_state.messages_display      = []
@@ -897,15 +935,15 @@ with st.sidebar:
                     st.session_state.active_tab            = "analyze"
                     st.rerun()
             with cd:
-                if st.button("✕", key=f"del_{name}"):
+                if st.button("?", key=f"del_{name}"):
                     del st.session_state.saved_chats[name]
                     save_chats(st.session_state.saved_chats)
                     st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════
-# TOP NAV — App title with spinning gear + white/orange color split
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
+# TOP NAV � App title with spinning gear + white/orange color split
+# ------------------------------------------------------------------
 
 tab_label = "ANALYZE" if st.session_state.active_tab == "analyze" else "LIBRARY"
 
@@ -937,14 +975,14 @@ with nav_col2:
 """, unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 # TAB: DRAWING LIBRARY
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 if st.session_state.active_tab == "library":
     lib = load_library()
 
-    # ── Add new drawing to library ──
+    # -- Add new drawing to library --
     st.markdown('<div class="section-label" style="margin-top:12px;">Add to Library</div>', unsafe_allow_html=True)
     add_file = st.file_uploader(
         "Add drawing", type=["png","jpg","jpeg","webp"],
@@ -972,7 +1010,7 @@ if st.session_state.active_tab == "library":
 
     st.markdown("<div style='height:1px;background:rgba(255,255,255,0.05);margin:14px 0'></div>", unsafe_allow_html=True)
 
-    # ── Browse and search library ──
+    # -- Browse and search library --
     st.markdown('<div class="section-label">Library</div>', unsafe_allow_html=True)
     search = st.text_input(
         "Search", placeholder="Search by name or tag...",
@@ -983,7 +1021,7 @@ if st.session_state.active_tab == "library":
     if not lib:
         st.markdown(
             '<div class="chat-empty">'
-            '<div style="font-size:30px;opacity:0.15;margin-bottom:8px;">📚</div>'
+            '<div style="font-size:30px;opacity:0.15;margin-bottom:8px;">⚙️</div>'
             '<div>No drawings saved yet</div></div>',
             unsafe_allow_html=True,
         )
@@ -1011,8 +1049,8 @@ if st.session_state.active_tab == "library":
                     if meta.get("notes") else ""
                 )
                 st.markdown(f'''<div class="lib-card">
-                    <div class="lib-name">📄 {meta["name"]}</div>
-                    <div class="lib-meta">{meta["added"]}  ·  {meta["size_mb"]} MB</div>
+                    <div class="lib-name">?? {meta["name"]}</div>
+                    <div class="lib-meta">{meta["added"]}  �  {meta["size_mb"]} MB</div>
                     {tags_html}{notes_txt}
                 </div>''', unsafe_allow_html=True)
 
@@ -1033,7 +1071,7 @@ if st.session_state.active_tab == "library":
                             st.session_state.chat_history          = []
                             st.session_state.messages_display      = []
                             st.session_state.active_tab            = "analyze"
-                            st.info("Drawing loaded — switch to Analyze tab and upload the file to start chatting.")
+                            st.info("Drawing loaded � switch to Analyze tab and upload the file to start chatting.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Could not open file: {e}")
@@ -1060,23 +1098,23 @@ if st.session_state.active_tab == "library":
                 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 # TAB: ANALYZE
-# ══════════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------
 
 else:
 
-    # ── File uploader ──
+    # -- File uploader --
     uploaded_file = st.file_uploader(
         "upload", type=["png","jpg","jpeg","webp"],
         label_visibility="collapsed",
         key=f"uploader_{st.session_state.uploader_key}",
     )
 
-    # ── Show cached image only when no file is currently uploaded ──
+    # -- Show cached image only when no file is currently uploaded --
     if not uploaded_file and st.session_state.get("current_drawing_image"):
         img = base64.b64decode(st.session_state.current_drawing_image)
-        st.image(img, width=180)
+        render_drawing_preview(img, "cached")
 
     file_ok = False
 
@@ -1090,17 +1128,19 @@ else:
                 st.error("Invalid file. Only real PNG, JPEG, and WEBP images accepted.")
             else:
                 file_ok = True
-            st.image(uploaded_file, width=180)
+
+            uploaded_file.seek(0)
+            img_bytes = uploaded_file.read()
+            uploaded_file.seek(0)
+
+            render_drawing_preview(img_bytes, uploaded_file.name)
             st.session_state.current_drawing_name = uploaded_file.name
 
             # Cache image as base64 for session persistence across reruns
             import base64
-            uploaded_file.seek(0)
-            img_bytes = uploaded_file.read()
             st.session_state.current_drawing_image = base64.b64encode(img_bytes).decode("utf-8")
-            uploaded_file.seek(0)
 
-    # ── Quick action buttons — Row 1: original 8 features ──
+    # -- Quick action buttons � Row 1: original 8 features --
     st.markdown('<div class="section-label" style="margin-top:10px;">Quick Actions</div>', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -1116,7 +1156,7 @@ else:
         q4 = st.button("Title Block",     use_container_width=True)
         q8 = st.button("View Type",       use_container_width=True)
 
-    # ── Advanced Features — Row 2: 5 new features ──
+    # -- Advanced Features � Row 2: 5 new features --
     st.markdown('<div class="section-label" style="margin-top:20px;">Advanced Analysis</div>', unsafe_allow_html=True)
     a1, a2, a3, a4, a5 = st.columns(5)
     with a1:
@@ -1130,7 +1170,7 @@ else:
     with a5:
         qa5 = st.button("Revision Diff",      use_container_width=True, help="Upload a second drawing to compare revisions")
 
-    # ── Revision comparison panel (shown only when Compare Revisions is active) ──
+    # -- Revision comparison panel (shown only when Compare Revisions is active) --
     rev_file_b = None
     if qa5:
         st.session_state.show_revision_panel = not st.session_state.show_revision_panel
@@ -1140,7 +1180,7 @@ else:
             '<div style="background:rgba(249,115,22,0.05);border:1px solid rgba(249,115,22,0.2);'
             'border-radius:10px;padding:12px 16px;margin:8px 0;">'
             '<div style="font-size:11px;color:#f97316;font-family:JetBrains Mono,monospace;'
-            'letter-spacing:1px;margin-bottom:8px;">REVISION COMPARISON — upload Rev B below</div>',
+            'letter-spacing:1px;margin-bottom:8px;">REVISION COMPARISON � upload Rev B below</div>',
             unsafe_allow_html=True,
         )
         rev_file_b = st.file_uploader(
@@ -1153,7 +1193,7 @@ else:
 
     st.markdown("<div style='height:1px;background:rgba(255,255,255,0.05);margin:12px 0'></div>", unsafe_allow_html=True)
 
-    # ── Chat message display ──
+    # -- Chat message display --
     if not st.session_state.messages_display:
         # Empty state
         st.markdown("""<div class="chat-empty">
@@ -1170,7 +1210,7 @@ else:
                 )
             else:
                 content = msg["content"]
-                # Title block — special table rendering
+                # Title block � special table rendering
                 if content.startswith("__TB__"):
                     bubble = render_title_block(content[6:])
                     st.markdown(
@@ -1178,7 +1218,7 @@ else:
                         f'<div class="bubble-ai" style="max-width:90%;">{bubble}</div></div>',
                         unsafe_allow_html=True,
                     )
-                # Dimension table — special table rendering
+                # Dimension table � special table rendering
                 elif content.startswith("__DIM__"):
                     bubble = render_dim_table(content[7:])
                     st.markdown(
@@ -1196,11 +1236,11 @@ else:
 
     # Footer credit line
     st.markdown(
-        '<div class="footer-txt" style="margin-bottom:8px;color:#ffffff;">Draft AI &mdash;Made With ♥️ by Rishi</div>',
+        '<div class="footer-txt" style="margin-bottom:8px;color:#ffffff;">Draft AI &mdash;Made With ?? by Rishi</div>',
         unsafe_allow_html=True,
     )
 
-    # ── Sticky bottom input bar ──
+    # -- Sticky bottom input bar --
     st.markdown('<div class="sticky-wrap"><div class="sticky-inner">', unsafe_allow_html=True)
 
     custom_q = st.text_area(
@@ -1213,7 +1253,7 @@ else:
         ask_btn = st.button("Analyze", type="primary", use_container_width=True)
 
     with col_clear:
-        if st.button("🗑️Clear", use_container_width=True, help="Clear chat"):
+        if st.button("???Clear", use_container_width=True, help="Clear chat"):
             st.session_state.chat_history     = []
             st.session_state.messages_display = []
             st.rerun()
@@ -1226,20 +1266,20 @@ else:
                 title_block_data=st.session_state.title_block_data,
             )
             st.download_button(
-                "📄Export PDF", data=pdf_buf,
+                "??Export PDF", data=pdf_buf,
                 file_name="drawing_analysis.pdf",
                 mime="application/pdf",
                 use_container_width=True,
             )
         else:
-            st.button("📄Export PDF", disabled=True, use_container_width=True)
+            st.button("??Export PDF", disabled=True, use_container_width=True)
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
 
-    # ══════════════════════════════════════════
-    # PROCESS — Determine which action to run
-    # ══════════════════════════════════════════
+    # ------------------------------------------
+    # PROCESS � Determine which action to run
+    # ------------------------------------------
 
     question       = None
     special_action = None
@@ -1273,7 +1313,7 @@ else:
         "missing_dims":     ("Checking for missing dimensions...", "Missing Dimension Detection"),
     }
 
-    # ── Special action handler ──
+    # -- Special action handler --
     if special_action:
         if not uploaded_file or not file_ok:
             st.warning("Please upload a valid engineering drawing first.")
@@ -1312,7 +1352,7 @@ else:
                 persist_chat()
                 st.rerun()
 
-    # ── Revision comparison handler (needs two files) ──
+    # -- Revision comparison handler (needs two files) --
     if st.session_state.show_revision_panel and rev_file_b:
         if not uploaded_file or not file_ok:
             st.warning("Please upload the primary drawing (Rev A) using the upload box above first.")
@@ -1322,7 +1362,7 @@ else:
             if rev_size > MAX_FILE_SIZE_MB:
                 st.error(f"Rev B file too large: {rev_size:.1f} MB.")
             elif not rev_valid:
-                st.error("❌ Invalid Rev B file. Only PNG, JPEG, WEBP accepted.")
+                st.error("? Invalid Rev B file. Only PNG, JPEG, WEBP accepted.")
             else:
                 ip = get_client_ip()
                 allowed, _ = check_rate_limit(ip)
@@ -1335,14 +1375,14 @@ else:
                         result = compare_revisions(uploaded_file, rev_file_b)
                     increment_rate_limit(ip)
 
-                    st.session_state.messages_display.append({"role": "user", "content": f"🔄 Compare Revisions: {uploaded_file.name} vs {rev_file_b.name}"})
+                    st.session_state.messages_display.append({"role": "user", "content": f"?? Compare Revisions: {uploaded_file.name} vs {rev_file_b.name}"})
                     st.session_state.messages_display.append({"role": "ai",   "content": result})
                     st.session_state.chat_history.append(    {"role": "user",      "content": "Compare drawing revisions"})
                     st.session_state.chat_history.append(    {"role": "assistant", "content": result})
                     st.session_state.show_revision_panel = False
                     persist_chat()
                     st.rerun()
-    # ── Free-text question handler ──
+    # -- Free-text question handler --
     if question:
         if not uploaded_file or not file_ok:
             st.warning("Please upload a valid engineering drawing first.")
@@ -1362,3 +1402,4 @@ else:
                 st.session_state.chat_history.append(    {"role": "assistant", "content": answer})
                 persist_chat()
                 st.rerun()
+
