@@ -47,6 +47,8 @@ LIBRARY_DIR         = "drawing_library"      # Folder for saved drawings
 
 MAX_CHATS           = 20   # Max saved chats before oldest is dropped
 MAX_FILE_SIZE_MB    = 10   # Max upload size in megabytes
+MAX_REQUESTS_PER_IP = 2    # Max AI requests per hour per IP
+RATE_LIMIT_FILE     = "rate_limits.json"
 
 # Ensure drawing library folder exists on startup
 Path(LIBRARY_DIR).mkdir(exist_ok=True)
@@ -77,6 +79,63 @@ def check_file_size(f):
     size = f.tell()
     f.seek(0)
     return size / (1024 * 1024)
+
+
+def load_rate_limits():
+    """Load rate limit records from disk."""
+    if os.path.exists(RATE_LIMIT_FILE):
+        try:
+            with open(RATE_LIMIT_FILE) as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+
+def save_rate_limits(d):
+    """Persist rate limit records to disk."""
+    with open(RATE_LIMIT_FILE, "w") as f:
+        json.dump(d, f)
+
+
+def get_client_ip():
+    """Get the client IP from request headers. Falls back to 'local'."""
+    try:
+        h  = st.context.headers
+        ip = h.get("x-forwarded-for", h.get("x-real-ip", "local"))
+        return ip.split(",")[0].strip()
+    except:
+        return "local"
+
+
+def check_rate_limit(ip):
+    """
+    Check if this IP is allowed to make another request.
+    Resets counter after 1 hour. Returns (allowed: bool, remaining: int).
+    """
+    lim = load_rate_limits()
+    now = time.time()
+    if ip not in lim:
+        lim[ip] = {"count": 0, "window_start": now}
+    e = lim[ip]
+    if now - e["window_start"] > 3600:
+        e["count"]        = 0
+        e["window_start"] = now
+    if e["count"] >= MAX_REQUESTS_PER_IP:
+        save_rate_limits(lim)
+        mins_left = max(1, int((3600 - (now - e["window_start"])) / 60))
+        return False, 0, mins_left
+    return True, MAX_REQUESTS_PER_IP - e["count"], 0
+
+
+def increment_rate_limit(ip):
+    """Increment the request counter for this IP."""
+    lim = load_rate_limits()
+    now = time.time()
+    if ip not in lim:
+        lim[ip] = {"count": 0, "window_start": now}
+    lim[ip]["count"] += 1
+    save_rate_limits(lim)
 
 
 
@@ -774,15 +833,64 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 #draft-ai-splash {
     position: fixed; inset: 0; background: #0b0b0b;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    z-index: 999999; animation: splashFade 0.5s ease 2.8s forwards;
+    z-index: 999999; animation: splashFade 0.5s ease 3.2s forwards;
+    overflow: hidden;
 }
 @keyframes splashFade { from { opacity: 1; pointer-events: all; } to { opacity: 0; pointer-events: none; } }
-.splash-title { font-family: 'Syne', sans-serif; font-size: 56px; font-weight: 800; letter-spacing: -0.05em; color: #fff; margin-bottom: 6px; }
+
+/* Floating orbs */
+.splash-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(72px);
+    opacity: 0.55;
+    animation: orbFloat linear infinite;
+    pointer-events: none;
+}
+.splash-orb-1 {
+    width: 340px; height: 340px;
+    background: radial-gradient(circle, rgba(249,115,22,0.9) 0%, rgba(249,115,22,0.2) 60%, transparent 100%);
+    animation-duration: 7s;
+    animation-name: orbFloat1;
+}
+.splash-orb-2 {
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(249,115,22,0.7) 0%, rgba(249,115,22,0.15) 60%, transparent 100%);
+    animation-duration: 5.5s;
+    animation-name: orbFloat2;
+}
+.splash-orb-3 {
+    width: 160px; height: 160px;
+    background: radial-gradient(circle, rgba(249,115,22,0.6) 0%, transparent 70%);
+    animation-duration: 4s;
+    animation-name: orbFloat3;
+}
+@keyframes orbFloat1 {
+    0%   { transform: translate(-30vw, -20vh) scale(1);   opacity: 0.45; }
+    25%  { transform: translate(25vw,  -35vh) scale(1.15); opacity: 0.6; }
+    50%  { transform: translate(30vw,   20vh) scale(0.9);  opacity: 0.5; }
+    75%  { transform: translate(-20vw,  30vh) scale(1.1);  opacity: 0.55; }
+    100% { transform: translate(-30vw, -20vh) scale(1);   opacity: 0.45; }
+}
+@keyframes orbFloat2 {
+    0%   { transform: translate(20vw,  25vh) scale(1);   opacity: 0.5; }
+    33%  { transform: translate(-28vw, -10vh) scale(1.2); opacity: 0.65; }
+    66%  { transform: translate(10vw,  -30vh) scale(0.85); opacity: 0.4; }
+    100% { transform: translate(20vw,  25vh) scale(1);   opacity: 0.5; }
+}
+@keyframes orbFloat3 {
+    0%   { transform: translate(5vw,  -25vh) scale(1);   opacity: 0.6; }
+    50%  { transform: translate(-15vw, 20vh) scale(1.3);  opacity: 0.35; }
+    100% { transform: translate(5vw,  -25vh) scale(1);   opacity: 0.6; }
+}
+
+.splash-content { position: relative; z-index: 2; text-align: center; }
+.splash-title { font-family: 'Syne', sans-serif; font-size: 58px; font-weight: 800; letter-spacing: -0.05em; color: #fff; margin-bottom: 6px; }
 .splash-title span { color: #f97316; }
-.splash-sub  { font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.2); letter-spacing: 0.14em; text-transform: uppercase; animation: splashSubFade 0.6s ease 0.4s both; }
+.splash-sub  { font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.25); letter-spacing: 0.16em; text-transform: uppercase; animation: splashSubFade 0.6s ease 0.4s both; }
 @keyframes splashSubFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.splash-bar-wrap { margin-top: 48px; width: 120px; height: 1px; background: rgba(255,255,255,0.08); overflow: hidden; }
-.splash-bar { height: 100%; background: #f97316; animation: splashBarFill 2.6s ease forwards; box-shadow: 0 0 12px rgba(249,115,22,0.6); }
+.splash-bar-wrap { margin-top: 44px; width: 120px; height: 1px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.splash-bar { height: 100%; background: #f97316; animation: splashBarFill 3.0s ease forwards; box-shadow: 0 0 14px rgba(249,115,22,0.7); }
 @keyframes splashBarFill { from { width: 0%; } to { width: 100%; } }
 
 /* ── SCROLLBAR — hidden everywhere ── */
@@ -833,9 +941,14 @@ if "splash_shown" not in st.session_state:
     st.session_state.splash_shown = True
     st.markdown("""
 <div id="draft-ai-splash">
-    <div class="splash-title">Draft <span>AI</span></div>
-    <div class="splash-sub">Get your design analysis in seconds</div>
-    <div class="splash-bar-wrap"><div class="splash-bar"></div></div>
+    <div class="splash-orb splash-orb-1"></div>
+    <div class="splash-orb splash-orb-2"></div>
+    <div class="splash-orb splash-orb-3"></div>
+    <div class="splash-content">
+        <div class="splash-title">Draft <span>AI</span></div>
+        <div class="splash-sub">Get your design analysis in seconds</div>
+        <div class="splash-bar-wrap"><div class="splash-bar"></div></div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -885,6 +998,9 @@ with st.sidebar:
     st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
     count = len(st.session_state.saved_chats)
     st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
+    _ip  = get_client_ip()
+    _, _rem, _ = check_rate_limit(_ip)
+    st.markdown(f'<div class="sb-quota">Requests left: <span>{_rem}</span> / {MAX_REQUESTS_PER_IP} this hour</div>', unsafe_allow_html=True)
 
     # New chat � clears current session
     if st.button("+ New Chat", use_container_width=True):
@@ -1780,6 +1896,25 @@ else:
         if not uploaded_file or not file_ok:
             st.warning("Please upload a valid engineering drawing first.")
         else:
+            ip = get_client_ip()
+            allowed, remaining, mins_left = check_rate_limit(ip)
+            if not allowed:
+                st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
+            else:
                 spinner_msg, user_label = ACTION_MAP[special_action]
                 with st.spinner(spinner_msg):
                     uploaded_file.seek(0)
@@ -1795,11 +1930,9 @@ else:
                     elif special_action == "titleblock":
                         result = extract_title_block(uploaded_file)
                         st.session_state.title_block_data = result
-
-                # Add special prefix so the renderer knows which template to use
+                increment_rate_limit(ip)
                 prefix     = {"dimensions": "__DIM__", "titleblock": "__TB__"}.get(special_action, "")
                 ai_content = f"{prefix}{result}"
-
                 st.session_state.messages_display.append({"role": "user",      "content": user_label})
                 st.session_state.messages_display.append({"role": "ai",        "content": ai_content})
                 st.session_state.chat_history.append(    {"role": "user",      "content": user_label})
@@ -1836,12 +1969,32 @@ else:
         if not uploaded_file or not file_ok:
             st.warning("Please upload a valid engineering drawing first.")
         else:
-            with st.spinner("Analyzing..."):
-                uploaded_file.seek(0)
-                answer = analyze_drawing(uploaded_file, question, st.session_state.chat_history)
-            st.session_state.messages_display.append({"role": "user",      "content": question})
-            st.session_state.messages_display.append({"role": "ai",        "content": answer})
-            st.session_state.chat_history.append(    {"role": "user",      "content": question})
-            st.session_state.chat_history.append(    {"role": "assistant", "content": answer})
-            persist_chat()
-            st.rerun()
+            ip = get_client_ip()
+            allowed, remaining, mins_left = check_rate_limit(ip)
+            if not allowed:
+                st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
+            else:
+                with st.spinner("Analyzing..."):
+                    uploaded_file.seek(0)
+                    answer = analyze_drawing(uploaded_file, question, st.session_state.chat_history)
+                increment_rate_limit(ip)
+                st.session_state.messages_display.append({"role": "user",      "content": question})
+                st.session_state.messages_display.append({"role": "ai",        "content": answer})
+                st.session_state.chat_history.append(    {"role": "user",      "content": question})
+                st.session_state.chat_history.append(    {"role": "assistant", "content": answer})
+                persist_chat()
+                st.rerun()
