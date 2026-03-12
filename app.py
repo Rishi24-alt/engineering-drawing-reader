@@ -31,6 +31,8 @@ from utils import (
     generate_bom_pdf,
     generate_bom,
     generate_bom_excel,
+    # -- Standards Checker --
+    check_drawing_standards,
 )
 import json, os, re, time, base64, shutil
 from datetime import datetime
@@ -46,6 +48,7 @@ LIBRARY_FILE        = "drawing_library.json" # Drawing library metadata
 LIBRARY_DIR         = "drawing_library"      # Folder for saved drawings
 
 MAX_CHATS           = 20   # Max saved chats before oldest is dropped
+MAX_BATCH_FILES     = 5    # Max drawings per batch analysis
 MAX_FILE_SIZE_MB    = 10   # Max upload size in megabytes
 MAX_REQUESTS_PER_IP = 2    # Max AI requests per hour per IP
 RATE_LIMIT_FILE     = "rate_limits.json"
@@ -843,58 +846,13 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 }
 @keyframes splashFade { from { opacity: 1; pointer-events: all; } to { opacity: 0; pointer-events: none; } }
 
-/* Floating orbs */
-.splash-orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(72px);
-    opacity: 0.55;
-    animation: orbFloat linear infinite;
-    pointer-events: none;
-}
-.splash-orb-1 {
-    width: 340px; height: 340px;
-    background: radial-gradient(circle, rgba(249,115,22,0.9) 0%, rgba(249,115,22,0.2) 60%, transparent 100%);
-    animation-duration: 7s;
-    animation-name: orbFloat1;
-}
-.splash-orb-2 {
-    width: 220px; height: 220px;
-    background: radial-gradient(circle, rgba(249,115,22,0.7) 0%, rgba(249,115,22,0.15) 60%, transparent 100%);
-    animation-duration: 5.5s;
-    animation-name: orbFloat2;
-}
-.splash-orb-3 {
-    width: 160px; height: 160px;
-    background: radial-gradient(circle, rgba(249,115,22,0.6) 0%, transparent 70%);
-    animation-duration: 4s;
-    animation-name: orbFloat3;
-}
-@keyframes orbFloat1 {
-    0%   { transform: translate(-30vw, -20vh) scale(1);   opacity: 0.45; }
-    25%  { transform: translate(25vw,  -35vh) scale(1.15); opacity: 0.6; }
-    50%  { transform: translate(30vw,   20vh) scale(0.9);  opacity: 0.5; }
-    75%  { transform: translate(-20vw,  30vh) scale(1.1);  opacity: 0.55; }
-    100% { transform: translate(-30vw, -20vh) scale(1);   opacity: 0.45; }
-}
-@keyframes orbFloat2 {
-    0%   { transform: translate(20vw,  25vh) scale(1);   opacity: 0.5; }
-    33%  { transform: translate(-28vw, -10vh) scale(1.2); opacity: 0.65; }
-    66%  { transform: translate(10vw,  -30vh) scale(0.85); opacity: 0.4; }
-    100% { transform: translate(20vw,  25vh) scale(1);   opacity: 0.5; }
-}
-@keyframes orbFloat3 {
-    0%   { transform: translate(5vw,  -25vh) scale(1);   opacity: 0.6; }
-    50%  { transform: translate(-15vw, 20vh) scale(1.3);  opacity: 0.35; }
-    100% { transform: translate(5vw,  -25vh) scale(1);   opacity: 0.6; }
-}
 
 .splash-content { position: relative; z-index: 2; text-align: center; }
 .splash-title { font-family: 'Syne', sans-serif; font-size: 58px; font-weight: 800; letter-spacing: -0.05em; color: #fff; margin-bottom: 6px; }
 .splash-title span { color: #f97316; }
 .splash-sub  { font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.25); letter-spacing: 0.16em; text-transform: uppercase; animation: splashSubFade 0.6s ease 0.4s both; }
 @keyframes splashSubFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.splash-bar-wrap { margin-top: 44px; width: 120px; height: 1px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.splash-bar-wrap { margin: 44px auto 0 auto; width: 120px; height: 1px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .splash-bar { height: 100%; background: #f97316; animation: splashBarFill 3.0s ease forwards; box-shadow: 0 0 14px rgba(249,115,22,0.7); }
 @keyframes splashBarFill { from { width: 0%; } to { width: 100%; } }
 
@@ -946,9 +904,6 @@ if "splash_shown" not in st.session_state:
     st.session_state.splash_shown = True
     st.markdown("""
 <div id="draft-ai-splash">
-    <div class="splash-orb splash-orb-1"></div>
-    <div class="splash-orb splash-orb-2"></div>
-    <div class="splash-orb splash-orb-3"></div>
     <div class="splash-content">
         <div class="splash-title">Draft <span>AI</span></div>
         <div class="splash-sub">Get your design analysis in seconds</div>
@@ -967,6 +922,7 @@ for k, v in [
     ("uploader_key",         0),
     ("batch_results",        []),
     ("batch_running",        False),
+    ("standards_result",     None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -997,6 +953,9 @@ with st.sidebar:
         st.rerun()
     if st.button("BOM Generator", use_container_width=True):
         st.session_state.active_tab = "bom"
+        st.rerun()
+    if st.button("Standards Checker", use_container_width=True):
+        st.session_state.active_tab = "standards"
         st.rerun()
 
     # Chat history section
@@ -1079,7 +1038,7 @@ if st.session_state.active_tab == "batch":
     st.markdown("""
 <div style="background:rgba(249,115,22,0.05);border:1px solid rgba(249,115,22,0.15);border-radius:8px;padding:12px 16px;margin-bottom:14px;">
     <div style="font-size:13px;color:rgba(255,255,255,0.85);font-family:Syne,sans-serif;">
-        Upload up to <b style="color:#f97316;">20 drawings</b> at once. Draft AI will analyze each one and generate a
+        Upload up to <b style="color:#f97316;">5 drawings</b> at once. Draft AI will analyze each one and generate a
         comparison report — exportable as <b style="color:#f97316;">Excel</b> or <b style="color:#f97316;">PDF</b>.
     </div>
 </div>
@@ -1106,9 +1065,9 @@ if st.session_state.active_tab == "batch":
     # File list preview
     if batch_files:
         st.markdown(f'<div class="section-label" style="margin-top:10px;">{len(batch_files)} drawings selected</div>', unsafe_allow_html=True)
-        if len(batch_files) > 20:
-            st.error("Maximum 20 drawings per batch. Please remove some files.")
-            batch_files = batch_files[:20]
+        if len(batch_files) > MAX_BATCH_FILES:
+            st.warning(f"Maximum {MAX_BATCH_FILES} drawings per batch. Only the first {MAX_BATCH_FILES} will be analyzed.")
+            batch_files = batch_files[:MAX_BATCH_FILES]
 
         # Show thumbnails grid
         cols = st.columns(5)
@@ -1615,6 +1574,180 @@ elif st.session_state.active_tab == "library":
                         st.rerun()
 
                 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+
+
+# ------------------------------------------------------------------
+# TAB: STANDARDS CHECKER
+# ------------------------------------------------------------------
+
+elif st.session_state.active_tab == "standards":
+
+    st.markdown('<div class="section-label" style="margin-top:12px;">Standards Checker</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+<div style="background:linear-gradient(135deg,rgba(249,115,22,0.10) 0%,rgba(249,115,22,0.03) 100%);
+            border:1px solid rgba(249,115,22,0.22);border-radius:12px;padding:16px 20px;margin-bottom:14px;">
+    <div style="font-size:14px;font-weight:700;color:#fff;font-family:Syne,sans-serif;margin-bottom:4px;">
+        Drawing Standards Compliance Check
+    </div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.55);line-height:1.6;">
+        Upload any engineering drawing — Draft AI checks it against
+        <b style="color:#f97316;">ASME Y14.5</b>,
+        <b style="color:#f97316;">ISO GPS</b>, and
+        <b style="color:#f97316;">BS 8888</b> and returns a
+        scored Pass / Fail report across 8 categories.
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+    std_file = st.file_uploader(
+        "Upload drawing for standards check",
+        type=["png","jpg","jpeg","webp"],
+        label_visibility="collapsed",
+        key="std_uploader",
+    )
+
+    if std_file:
+        sz    = check_file_size(std_file)
+        valid, _ = validate_file(std_file)
+        if sz > MAX_FILE_SIZE_MB:
+            st.error(f"File too large: {sz:.1f} MB. Max {MAX_FILE_SIZE_MB} MB.")
+        elif not valid:
+            st.error("Invalid file. PNG, JPEG or WEBP only.")
+        else:
+            prev_col, btn_col = st.columns([3, 1])
+            with prev_col:
+                std_file.seek(0)
+                st.image(std_file.read(), use_container_width=True)
+                std_file.seek(0)
+            with btn_col:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                run_std = st.button("Run Check", type="primary", use_container_width=True)
+                st.markdown("""<div style="font-size:10px;color:rgba(255,255,255,0.2);margin-top:8px;line-height:1.5;font-family:DM Mono,monospace;">
+                    Checks 8 categories against ASME / ISO / BS 8888
+                </div>""", unsafe_allow_html=True)
+
+            if run_std:
+                ip = get_client_ip()
+                allowed, remaining, mins_left = check_rate_limit(ip)
+                if not allowed:
+                    st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
+                else:
+                    with st.spinner("Checking drawing against standards..."):
+                        std_file.seek(0)
+                        try:
+                            result = check_drawing_standards(std_file)
+                            st.session_state.standards_result = result
+                            increment_rate_limit(ip)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Standards check failed: {e}")
+
+    # ── Results ──
+    if st.session_state.get("standards_result"):
+        r       = st.session_state.standards_result
+        score   = r.get("overall_score", 0)
+        verdict = r.get("verdict", "—")
+        std_det = r.get("standard_detected", "Unknown")
+
+        if verdict == "PASS":
+            v_color = "#16a34a"; v_bg = "rgba(22,163,74,0.08)";   v_border = "rgba(22,163,74,0.25)"
+        elif verdict == "CONDITIONAL PASS":
+            v_color = "#d97706"; v_bg = "rgba(217,119,6,0.08)";   v_border = "rgba(217,119,6,0.25)"
+        else:
+            v_color = "#dc2626"; v_bg = "rgba(220,38,38,0.08)";   v_border = "rgba(220,38,38,0.25)"
+
+        st.markdown(f"""
+<div style="display:flex;gap:16px;margin:16px 0;align-items:stretch;flex-wrap:wrap;">
+  <div style="flex:0 0 160px;background:{v_bg};border:1px solid {v_border};border-radius:12px;
+              padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+    <div style="font-size:48px;font-weight:800;color:{v_color};font-family:Syne,sans-serif;line-height:1;">{score}</div>
+    <div style="font-size:10px;color:rgba(255,255,255,0.3);font-family:DM Mono,monospace;letter-spacing:.1em;margin:4px 0 10px;">/ 100</div>
+    <div style="font-size:11px;font-weight:700;color:{v_color};background:{v_bg};
+                border:1px solid {v_border};border-radius:6px;padding:4px 10px;letter-spacing:.04em;">{verdict}</div>
+    <div style="font-size:9px;color:rgba(255,255,255,0.25);font-family:DM Mono,monospace;margin-top:8px;">{std_det}</div>
+  </div>
+  <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);
+              border-radius:12px;padding:16px 18px;">
+    <div style="font-size:9px;color:rgba(255,255,255,0.25);font-family:DM Mono,monospace;
+                letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;">Executive Summary</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.8);line-height:1.7;font-family:Syne,sans-serif;">
+        {r.get("summary","—")}
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # Category breakdown
+        checks = r.get("checks", [])
+        if checks:
+            st.markdown('<div class="section-label" style="margin-top:4px;">Category Breakdown</div>', unsafe_allow_html=True)
+            cols = st.columns(2)
+            for i, chk in enumerate(checks):
+                cat_status = chk.get("status", "—")
+                cat_score  = chk.get("score", 0)
+                if cat_status == "PASS":
+                    cs_color = "#16a34a"; cs_bg = "rgba(22,163,74,0.06)";  cs_border = "rgba(22,163,74,0.18)"
+                elif cat_status == "WARNING":
+                    cs_color = "#d97706"; cs_bg = "rgba(217,119,6,0.06)";  cs_border = "rgba(217,119,6,0.18)"
+                else:
+                    cs_color = "#dc2626"; cs_bg = "rgba(220,38,38,0.06)";  cs_border = "rgba(220,38,38,0.18)"
+                findings_html  = "".join(f'<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;">✓ {f}</div>' for f in chk.get("findings",[])[:3])
+                violations_html= "".join(f'<div style="font-size:11px;color:#dc2626;margin-top:2px;">✗ {v}</div>'              for v in chk.get("violations",[])[:3])
+                with cols[i % 2]:
+                    st.markdown(f"""
+<div style="background:{cs_bg};border:1px solid {cs_border};border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:12px;font-weight:600;color:#fff;font-family:Syne,sans-serif;">{chk.get("category","—")}</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <span style="font-size:11px;color:#f97316;font-family:DM Mono,monospace;">{cat_score}/100</span>
+            <span style="font-size:9px;background:{cs_bg};color:{cs_color};border:1px solid {cs_border};
+                         padding:2px 7px;border-radius:4px;font-family:DM Mono,monospace;letter-spacing:.04em;">{cat_status}</span>
+        </div>
+    </div>
+    {findings_html}{violations_html}
+</div>""", unsafe_allow_html=True)
+
+        crits = r.get("critical_violations", [])
+        warns = r.get("warnings", [])
+        recs  = r.get("recommendations", [])
+
+        if crits:
+            st.markdown('<div class="section-label" style="margin-top:4px;">Critical Violations</div>', unsafe_allow_html=True)
+            for c in crits:
+                st.markdown(f'<div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.2);border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px;color:#fca5a5;font-family:Syne,sans-serif;">✗ {c}</div>', unsafe_allow_html=True)
+
+        if warns:
+            st.markdown('<div class="section-label" style="margin-top:8px;">Warnings</div>', unsafe_allow_html=True)
+            for w in warns:
+                st.markdown(f'<div style="background:rgba(217,119,6,0.06);border:1px solid rgba(217,119,6,0.18);border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px;color:#fcd34d;font-family:Syne,sans-serif;">⚠ {w}</div>', unsafe_allow_html=True)
+
+        if recs:
+            st.markdown('<div class="section-label" style="margin-top:8px;">Recommendations</div>', unsafe_allow_html=True)
+            for idx, rec in enumerate(recs, 1):
+                st.markdown(f'<div style="background:rgba(249,115,22,0.04);border:1px solid rgba(249,115,22,0.12);border-radius:8px;padding:10px 14px;margin-bottom:6px;font-size:12px;color:rgba(255,255,255,0.7);font-family:Syne,sans-serif;"><span style="color:#f97316;font-weight:700;">{idx}.</span> {rec}</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        if st.button("🗑 Clear Results", key="std_clear"):
+            st.session_state.standards_result = None
+            st.rerun()
+
+    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;|&nbsp; Made with ♥ by Rishi</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
