@@ -637,77 +637,37 @@ section[data-testid="stSidebar"][aria-expanded="false"] {
     background: #0b0b0b !important;
 }
 
-/* collapsedControl must always escape any overflow clipping */
+/* Hide Streamlit's native sidebar toggle buttons — replaced by JS button */
+[data-testid="stSidebarCollapseButton"],
 [data-testid="collapsedControl"] {
-    overflow: visible !important;
-    clip: unset !important;
-    clip-path: none !important;
+    display: none !important;
 }
 
-/* ── Native collapse/expand button — fixed position, always visible ── */
-/* Sidebar collapse button - always visible */
-[data-testid="stSidebarCollapseButton"] {
+/* ── Custom sidebar toggle button injected by JS ── */
+#custom-sidebar-toggle {
     position: fixed !important;
-    top: 70px !important;
-    left: 262px !important;   /* just outside sidebar */
-    z-index: 99999 !important;
+    top: 14px !important;
+    left: 14px !important;
+    z-index: 999999 !important;
     width: 34px !important;
     height: 34px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-
-/* When sidebar is collapsed */
-[data-testid="collapsedControl"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;   /* was 0 */
-    position: fixed !important;
-    top: 68px !important;
-    left: 8px !important;
-    z-index: 99999 !important;
-    width: 34px !important;
-    height: 34px !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-
-[data-testid="stSidebarCollapseButton"] button,
-[data-testid="collapsedControl"] button {
-    width: 34px !important;
-    height: 34px !important;
-    background: transparent !important;
-    border: none !important;
-    color: rgba(255,255,255,0.6) !important;
-    font-size: 15px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+    background: rgba(13,13,13,0.88) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: rgba(255,255,255,0.65) !important;
+    font-size: 18px !important;
     cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: color 0.15s, background 0.15s, border-color 0.15s !important;
+    line-height: 1 !important;
     padding: 0 !important;
-    transition: color 0.15s !important;
 }
-[data-testid="stSidebarCollapseButton"] button:hover,
-[data-testid="collapsedControl"] button:hover {
+#custom-sidebar-toggle:hover {
     color: #f97316 !important;
-    background: rgba(249,115,22,0.08) !important;
-    border-radius: 7px !important;
-}
-            
-/* override streamlit hover hiding */
-section[data-testid="stSidebar"] [data-testid="collapsedControl"],
-section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {
-    opacity: 1 !important;
-    visibility: visible !important;
-    transform: none !important;
-}
-
-/* stop hover behaviour completely */
-section[data-testid="stSidebar"]:not(:hover) [data-testid="collapsedControl"],
-section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarCollapseButton"] {
-    opacity: 1 !important;
-    visibility: visible !important;
+    background: rgba(249,115,22,0.1) !important;
+    border-color: rgba(249,115,22,0.3) !important;
 }
 .sb-logo { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.04em; color: #fff; margin-top: -6px; margin-bottom: 1px; }
 .sb-logo span { color: #f97316; }
@@ -1086,6 +1046,34 @@ if "saved_chats" not in st.session_state:
 
 with st.sidebar:
     render_navigation_panel("sidebar")
+
+# Inject sidebar toggle via components (st.markdown strips <script> tags)
+import streamlit.components.v1 as _components
+_components.html("""
+<script>
+(function() {
+    function clickNativeToggle() {
+        var doc = window.parent.document;
+        var b = doc.querySelector('[data-testid="stSidebarCollapseButton"] button')
+             || doc.querySelector('[data-testid="collapsedControl"] button');
+        if (b) { b.click(); }
+    }
+    function init() {
+        var doc = window.parent.document;
+        if (doc.getElementById('custom-sidebar-toggle')) return;
+        var btn = doc.createElement('button');
+        btn.id = 'custom-sidebar-toggle';
+        btn.innerHTML = '&#9776;';
+        btn.title = 'Toggle sidebar';
+        btn.onclick = clickNativeToggle;
+        doc.body.appendChild(btn);
+    }
+    setTimeout(init, 300);
+    setTimeout(init, 1000);
+    setTimeout(init, 2500);
+})();
+</script>
+""", height=0)
 
 
 # ------------------------------------------------------------------
