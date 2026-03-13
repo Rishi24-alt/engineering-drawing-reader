@@ -612,48 +612,91 @@ html, body {
 }
 .top-bar-file .dot { color: #22c55e; margin-right: 5px; }
 
-/* ── SIDEBAR: permanently fixed, never collapses ── */
-
-/* Hide every collapse/expand toggle Streamlit might render */
-[data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarNavCollapseButton"],
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"],
-button[aria-label="Close sidebar"],
-button[aria-label="Open sidebar"],
-button[aria-label="close sidebar"],
-button[aria-label="open sidebar"] {
-    display: none !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    opacity: 0 !important;
-}
-
-/* Sidebar always visible, fixed width */
+/* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
     background: #0d0d0d !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
     min-width: 260px !important;
     max-width: 260px !important;
-    transform: none !important;
-    visibility: visible !important;
-    display: block !important;
-    opacity: 1 !important;
-    flex-shrink: 0 !important;
-}
-/* Force open even when Streamlit internally marks it collapsed */
-[data-testid="stSidebar"][aria-expanded="false"] {
-    transform: none !important;
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    min-width: 260px !important;
-    max-width: 260px !important;
-    margin-left: 0 !important;
 }
 [data-testid="stSidebar"] > div:first-child { padding: 24px 14px !important; }
+
+/* Kill the reddish bleed when sidebar is collapsed */
+[data-testid="stSidebarContent"] {
+    background: #0d0d0d !important;
+}
+section[data-testid="stSidebar"][aria-expanded="false"] {
+    background: transparent !important;
+    border-right: none !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    overflow: visible !important;
+}
+/* Streamlit app background behind sidebar area */
+[data-testid="stAppViewContainer"] > section:first-child {
+    background: #0b0b0b !important;
+}
+
+/* collapsedControl must always escape any overflow clipping */
+[data-testid="collapsedControl"] {
+    overflow: visible !important;
+    clip: unset !important;
+    clip-path: none !important;
+}
+
+/* ── Native collapse/expand button — fixed position, always visible ── */
+[data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    position: fixed !important;
+    top: 68px !important;
+    left: 268px !important;
+    z-index: 99999 !important;
+    width: 34px !important;
+    height: 34px !important;
+    
+  
+    align-items: center !important;
+    justify-content: center !important;
+
+}
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 0 !important;
+    position: fixed !important;
+    top: 68px !important;
+    left: 8px !important;
+    z-index: 99999 !important;
+    width: 34px !important;
+    height: 34px !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+}
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="collapsedControl"] button {
+    width: 34px !important;
+    height: 34px !important;
+    background: transparent !important;
+    border: none !important;
+    color: rgba(255,255,255,0.6) !important;
+    font-size: 15px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    padding: 0 !important;
+    transition: color 0.15s !important;
+}
+[data-testid="stSidebarCollapseButton"] button:hover,
+[data-testid="collapsedControl"] button:hover {
+    color: #f97316 !important;
+    background: rgba(249,115,22,0.08) !important;
+    border-radius: 7px !important;
+}
 
 .sb-logo { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.04em; color: #fff; margin-top: -6px; margin-bottom: 1px; }
 .sb-logo span { color: #f97316; }
@@ -1013,7 +1056,6 @@ for k, v in [
     ("current_drawing_name", None),
     ("title_block_data",     None),
     ("active_tab",           "analyze"),
-    ("show_sidebar",         True),
     ("show_revision_panel",  False),
     ("uploader_key",         0),
     ("batch_results",        []),
@@ -1025,58 +1067,6 @@ for k, v in [
 
 if "saved_chats" not in st.session_state:
     st.session_state.saved_chats = load_chats()
-
-if st.session_state.show_sidebar:
-    sidebar_state_css = """
-    <style>
-    [data-testid="stSidebar"] {
-        min-width: 300px !important;
-        max-width: 300px !important;
-        transform: translateX(0) !important;
-        margin-left: 0 !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-    }
-    [data-testid="stSidebar"][aria-expanded="false"] {
-        min-width: 300px !important;
-        max-width: 300px !important;
-        transform: translateX(0) !important;
-        margin-left: 0 !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-    }
-    </style>
-    """
-else:
-    sidebar_state_css = """
-    <style>
-    [data-testid="stSidebar"] {
-        min-width: 0 !important;
-        max-width: 0 !important;
-        width: 0 !important;
-        transform: translateX(-320px) !important;
-        margin-left: -320px !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        overflow: hidden !important;
-    }
-    [data-testid="stSidebar"][aria-expanded="false"] {
-        min-width: 0 !important;
-        max-width: 0 !important;
-        width: 0 !important;
-        transform: translateX(-320px) !important;
-        margin-left: -320px !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        overflow: hidden !important;
-    }
-    </style>
-    """
-st.markdown(sidebar_state_css, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
