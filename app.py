@@ -1047,33 +1047,39 @@ if "saved_chats" not in st.session_state:
 with st.sidebar:
     render_navigation_panel("sidebar")
 
-# Inject sidebar toggle via components (st.markdown strips <script> tags)
+# Re-inject sidebar toggle on every rerun so it works across all tabs.
+# Removing and re-adding the button ensures onclick always calls the live iframe.
 import streamlit.components.v1 as _components
 _components.html("""
 <script>
 (function() {
     function clickNativeToggle() {
         var doc = window.parent.document;
+        // Try collapse button (sidebar open) then expand button (sidebar closed)
         var b = doc.querySelector('[data-testid="stSidebarCollapseButton"] button')
              || doc.querySelector('[data-testid="collapsedControl"] button');
         if (b) { b.click(); }
     }
-    function init() {
+    function inject() {
         var doc = window.parent.document;
-        if (doc.getElementById('custom-sidebar-toggle')) return;
+        // Always remove stale button so this rerun's fresh onclick is wired up
+        var existing = doc.getElementById('custom-sidebar-toggle');
+        if (existing) existing.remove();
         var btn = doc.createElement('button');
         btn.id = 'custom-sidebar-toggle';
         btn.innerHTML = '&#9776;';
-        btn.title = 'Toggle sidebar';
-        btn.onclick = clickNativeToggle;
+        btn.setAttribute('title', 'Toggle sidebar');
+        btn.addEventListener('click', clickNativeToggle);
         doc.body.appendChild(btn);
     }
-    setTimeout(init, 300);
-    setTimeout(init, 1000);
-    setTimeout(init, 2500);
+    // Run immediately and after a short delay to survive slow renders
+    inject();
+    setTimeout(inject, 600);
 })();
 </script>
-""", height=0)
+""", height=1, scrolling=False)
+
+
 
 
 # ------------------------------------------------------------------
