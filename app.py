@@ -245,6 +245,69 @@ def persist_chat():
     save_chats(st.session_state.saved_chats)
 
 
+def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
+    # Logo row with collapse button
+    st.markdown('<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
+    nav_items = [
+        ("Analyze Drawing", "analyze"),
+        ("Batch Analysis", "batch"),
+        ("Drawing Library", "library"),
+        ("BOM Generator", "bom"),
+        ("Standards Checker", "standards"),
+    ]
+    for label, tab in nav_items:
+        if st.button(label, key=f"{key_prefix}_{tab}", use_container_width=True):
+            st.session_state.active_tab = tab
+            st.rerun()
+
+    st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
+    count = len(st.session_state.saved_chats)
+    st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
+    _ip = get_client_ip()
+    _, _rem, _ = check_rate_limit(_ip)
+    st.markdown(f'<div class="sb-quota">Requests left: <span>{_rem}</span> / {MAX_REQUESTS_PER_IP} this hour</div>', unsafe_allow_html=True)
+
+    if st.button("+ New Chat", key=f"{key_prefix}_new_chat", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.messages_display = []
+        st.session_state.current_drawing_name = None
+        st.session_state.title_block_data = None
+        st.session_state.current_drawing_image = None
+        st.session_state.uploader_key += 1
+        st.rerun()
+
+    if not include_saved_chats:
+        return
+
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    if not st.session_state.saved_chats:
+        st.markdown(
+            '<div style="font-size:11px;color:rgba(255,255,255,0.12);'
+            'font-family:\'JetBrains Mono\',monospace;padding:4px 0;">No chats yet.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    for name in reversed(list(st.session_state.saved_chats.keys())):
+        cb, cd = st.columns([5, 1])
+        with cb:
+            if st.button(f"{name[:22]}", key=f"{key_prefix}_load_{name}", use_container_width=True):
+                s = st.session_state.saved_chats[name]
+                st.session_state.messages_display = s["messages_display"]
+                st.session_state.chat_history = s["chat_history"]
+                st.session_state.current_drawing_name = name
+                st.session_state.current_drawing_image = s.get("image")
+                st.session_state.active_tab = "analyze"
+                st.rerun()
+        with cd:
+            if st.button("X", key=f"{key_prefix}_del_{name}", use_container_width=True):
+                del st.session_state.saved_chats[name]
+                save_chats(st.session_state.saved_chats)
+                st.rerun()
+
+
 # ------------------------------------------------------------------
 # MESSAGE FORMATTER � Convert AI text to styled HTML bubbles
 # ------------------------------------------------------------------
@@ -476,7 +539,15 @@ html, body {
     overflow-y: auto !important;
     min-height: 100vh !important;
 }
-[data-testid="stHeader"] { background: transparent !important; height: 0 !important; }
+[data-testid="stHeader"] {
+    background: transparent !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: relative !important;
+    z-index: 100001 !important;
+}
+[data-testid="stHeader"] > div { overflow: visible !important; }
 
 /* Hide ALL scrollbars by default */
 ::-webkit-scrollbar { width: 0px !important; height: 0px !important; display: none !important; }
@@ -541,22 +612,46 @@ html, body {
 }
 .top-bar-file .dot { color: #22c55e; margin-right: 5px; }
 
-/* ── SIDEBAR TOGGLE ── */
-[data-testid="collapsedControl"] {
-    position: fixed !important; top: 14px !important; left: 14px !important;
-    z-index: 99999 !important; display: flex !important; visibility: visible !important; opacity: 1 !important;
-    background: rgba(249,115,22,0.08) !important;
-    border: 1px solid rgba(249,115,22,0.2) !important;
-    border-radius: 6px !important; padding: 5px 9px !important; cursor: pointer !important;
-    transition: all 0.15s !important;
-}
-[data-testid="collapsedControl"]:hover { background: rgba(249,115,22,0.15) !important; }
-[data-testid="collapsedControl"] svg { color: #f97316 !important; fill: #f97316 !important; width: 15px !important; height: 15px !important; }
+/* ── SIDEBAR: permanently fixed, never collapses ── */
 
-/* ── SIDEBAR ── */
+/* Hide every collapse/expand toggle Streamlit might render */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarNavCollapseButton"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[aria-label="Close sidebar"],
+button[aria-label="Open sidebar"],
+button[aria-label="close sidebar"],
+button[aria-label="open sidebar"] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    opacity: 0 !important;
+}
+
+/* Sidebar always visible, fixed width */
 [data-testid="stSidebar"] {
     background: #0d0d0d !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    transform: none !important;
+    visibility: visible !important;
+    display: block !important;
+    opacity: 1 !important;
+    flex-shrink: 0 !important;
+}
+/* Force open even when Streamlit internally marks it collapsed */
+[data-testid="stSidebar"][aria-expanded="false"] {
+    transform: none !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    margin-left: 0 !important;
 }
 [data-testid="stSidebar"] > div:first-child { padding: 24px 14px !important; }
 
@@ -918,6 +1013,7 @@ for k, v in [
     ("current_drawing_name", None),
     ("title_block_data",     None),
     ("active_tab",           "analyze"),
+    ("show_sidebar",         True),
     ("show_revision_panel",  False),
     ("uploader_key",         0),
     ("batch_results",        []),
@@ -930,78 +1026,65 @@ for k, v in [
 if "saved_chats" not in st.session_state:
     st.session_state.saved_chats = load_chats()
 
+if st.session_state.show_sidebar:
+    sidebar_state_css = """
+    <style>
+    [data-testid="stSidebar"] {
+        min-width: 300px !important;
+        max-width: 300px !important;
+        transform: translateX(0) !important;
+        margin-left: 0 !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        min-width: 300px !important;
+        max-width: 300px !important;
+        transform: translateX(0) !important;
+        margin-left: 0 !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    </style>
+    """
+else:
+    sidebar_state_css = """
+    <style>
+    [data-testid="stSidebar"] {
+        min-width: 0 !important;
+        max-width: 0 !important;
+        width: 0 !important;
+        transform: translateX(-320px) !important;
+        margin-left: -320px !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        min-width: 0 !important;
+        max-width: 0 !important;
+        width: 0 !important;
+        transform: translateX(-320px) !important;
+        margin-left: -320px !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        overflow: hidden !important;
+    }
+    </style>
+    """
+st.markdown(sidebar_state_css, unsafe_allow_html=True)
+
 
 # ------------------------------------------------------------------
 # SIDEBAR
 # ------------------------------------------------------------------
 
 with st.sidebar:
-
-    # App branding
-    st.markdown('<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True)
-
-    # Navigation tab switcher
-    st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
-    if st.button("Analyze Drawing", use_container_width=True):
-        st.session_state.active_tab = "analyze"
-        st.rerun()
-    if st.button("Batch Analysis", use_container_width=True):
-        st.session_state.active_tab = "batch"
-        st.rerun()
-    if st.button("Drawing Library", use_container_width=True):
-        st.session_state.active_tab = "library"
-        st.rerun()
-    if st.button("BOM Generator", use_container_width=True):
-        st.session_state.active_tab = "bom"
-        st.rerun()
-    if st.button("Standards Checker", use_container_width=True):
-        st.session_state.active_tab = "standards"
-        st.rerun()
-
-    # Chat history section
-    st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
-    count = len(st.session_state.saved_chats)
-    st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
-    _ip  = get_client_ip()
-    _, _rem, _ = check_rate_limit(_ip)
-    st.markdown(f'<div class="sb-quota">Requests left: <span>{_rem}</span> / {MAX_REQUESTS_PER_IP} this hour</div>', unsafe_allow_html=True)
-
-    # New chat � clears current session
-    if st.button("+ New Chat", use_container_width=True):
-        st.session_state.chat_history          = []
-        st.session_state.messages_display      = []
-        st.session_state.current_drawing_name  = None
-        st.session_state.title_block_data      = None
-        st.session_state.current_drawing_image = None
-        st.session_state.uploader_key         += 1
-        st.rerun()
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    # List saved chats with load / delete buttons
-    if not st.session_state.saved_chats:
-        st.markdown(
-            '<div style="font-size:11px;color:rgba(255,255,255,0.12);'
-            'font-family:\'JetBrains Mono\',monospace;padding:4px 0;">No chats yet.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        for name in reversed(list(st.session_state.saved_chats.keys())):
-            cb, cd = st.columns([5, 1])
-            with cb:
-                if st.button(f"{name[:22]}", key=f"load_{name}"):
-                    s = st.session_state.saved_chats[name]
-                    st.session_state.messages_display      = s["messages_display"]
-                    st.session_state.chat_history          = s["chat_history"]
-                    st.session_state.current_drawing_name  = name
-                    st.session_state.current_drawing_image = s.get("image")
-                    st.session_state.active_tab            = "analyze"
-                    st.rerun()
-            with cd:
-                if st.button("X", key=f"del_{name}"):
-                    del st.session_state.saved_chats[name]
-                    save_chats(st.session_state.saved_chats)
-                    st.rerun()
+    render_navigation_panel("sidebar")
 
 
 # ------------------------------------------------------------------
