@@ -12,3 +12,4 @@ headless = true
 enableXsrfProtection = true
 maxUploadSize = 10
 port = 8501
+runOnSave = false
