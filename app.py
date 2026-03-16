@@ -39,7 +39,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-
 # ------------------------------------------------------------------
 # CONSTANTS
 # ------------------------------------------------------------------
@@ -51,52 +50,8 @@ LIBRARY_DIR         = "drawing_library"      # Folder for saved drawings
 MAX_CHATS           = 20   # Max saved chats before oldest is dropped
 MAX_BATCH_FILES     = 5    # Max drawings per batch analysis
 MAX_FILE_SIZE_MB    = 10   # Max upload size in megabytes
+MAX_REQUESTS_PER_IP = 2    # Max AI requests per hour per IP
 RATE_LIMIT_FILE     = "rate_limits.json"
-
-# ── TIER CONFIGURATION ──
-TIER_CONFIG = {
-    "free": {
-        "label":         "Free",
-        "color":         "rgba(255,255,255,0.4)",
-        "bg":            "rgba(255,255,255,0.06)",
-        "border":        "rgba(255,255,255,0.1)",
-        "max_requests":  2,
-        "window_seconds": 3600,       # 1 hour
-        "window_label":  "hour",
-        "batch_limit":   5,
-        "library_limit": 10,
-    },
-    "pro": {
-        "label":         "Pro",
-        "color":         "#f97316",
-        "bg":            "rgba(249,115,22,0.1)",
-        "border":        "rgba(249,115,22,0.3)",
-        "max_requests":  50,
-        "window_seconds": 86400,      # 24 hours
-        "window_label":  "day",
-        "batch_limit":   20,
-        "library_limit": 9999,
-    },
-    "enterprise": {
-        "label":         "Enterprise",
-        "color":         "#a855f7",
-        "bg":            "rgba(168,85,247,0.1)",
-        "border":        "rgba(168,85,247,0.3)",
-        "max_requests":  9999,
-        "window_seconds": 86400,
-        "window_label":  "day",
-        "batch_limit":   100,
-        "library_limit": 9999,
-    },
-}
-
-def get_user_tier():
-    """Get the current user's plan tier from session state."""
-    return st.session_state.get("user_tier", "free")
-
-def get_tier_config():
-    """Get the config dict for the current user's tier."""
-    return TIER_CONFIG[get_user_tier()]
 
 # Ensure drawing library folder exists on startup
 Path(LIBRARY_DIR).mkdir(exist_ok=True)
@@ -159,24 +114,21 @@ def get_client_ip():
 def check_rate_limit(ip):
     """
     Check if this IP is allowed to make another request.
-    Uses tier-based limits. Returns (allowed: bool, remaining: int, mins_left: int).
+    Resets counter after 1 hour. Returns (allowed: bool, remaining: int).
     """
-    tier = get_tier_config()
-    max_req = tier["max_requests"]
-    window  = tier["window_seconds"]
     lim = load_rate_limits()
     now = time.time()
     if ip not in lim:
         lim[ip] = {"count": 0, "window_start": now}
     e = lim[ip]
-    if now - e["window_start"] > window:
+    if now - e["window_start"] > 3600:
         e["count"]        = 0
         e["window_start"] = now
-    if e["count"] >= max_req:
+    if e["count"] >= MAX_REQUESTS_PER_IP:
         save_rate_limits(lim)
-        mins_left = max(1, int((window - (now - e["window_start"])) / 60))
+        mins_left = max(1, int((3600 - (now - e["window_start"])) / 60))
         return False, 0, mins_left
-    return True, max_req - e["count"], 0
+    return True, MAX_REQUESTS_PER_IP - e["count"], 0
 
 
 def increment_rate_limit(ip):
@@ -187,49 +139,6 @@ def increment_rate_limit(ip):
         lim[ip] = {"count": 0, "window_start": now}
     lim[ip]["count"] += 1
     save_rate_limits(lim)
-
-
-def render_upgrade_prompt(mins_left):
-    """Show a professional SaaS upgrade prompt when rate limit is hit."""
-    tier = get_tier_config()
-    st.markdown(f"""
-<div style="background:linear-gradient(135deg,rgba(249,115,22,0.08),rgba(249,115,22,0.02));
-            border:1px solid rgba(249,115,22,0.25);border-radius:14px;padding:20px 24px;margin:8px 0;
-            position:relative;overflow:hidden;">
-    <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                background:linear-gradient(90deg,transparent,#f97316,transparent);"></div>
-    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:8px;">
-        You've reached your {tier['label']} plan limit
-    </div>
-    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:16px;">
-        Upgrade to <b style="color:#f97316;">Pro</b> for 50 analyses/day, batch processing,
-        Excel/PDF export, and priority processing.
-    </div>
-    <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:140px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
-                    border-radius:8px;padding:10px 12px;text-align:center;">
-            <div style="font-size:10px;color:rgba(255,255,255,0.3);font-family:'DM Mono',monospace;
-                        letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;">Free</div>
-            <div style="font-size:14px;color:rgba(255,255,255,0.4);font-weight:600;">2 / hour</div>
-        </div>
-        <div style="flex:1;min-width:140px;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.25);
-                    border-radius:8px;padding:10px 12px;text-align:center;">
-            <div style="font-size:10px;color:#f97316;font-family:'DM Mono',monospace;
-                        letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;">Pro</div>
-            <div style="font-size:14px;color:#f97316;font-weight:700;">50 / day</div>
-        </div>
-        <div style="flex:1;min-width:140px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);
-                    border-radius:8px;padding:10px 12px;text-align:center;">
-            <div style="font-size:10px;color:#a855f7;font-family:'DM Mono',monospace;
-                        letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;">Enterprise</div>
-            <div style="font-size:14px;color:#a855f7;font-weight:700;">Unlimited</div>
-        </div>
-    </div>
-    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:0.04em;">
-        \u23f1 Try again in ~{mins_left} min &nbsp;\u00b7&nbsp; Pro starts at $29/mo
-    </div>
-</div>
-""", unsafe_allow_html=True)
 
 
 
@@ -334,50 +243,34 @@ def persist_chat():
     if len(st.session_state.saved_chats) > MAX_CHATS:
         del st.session_state.saved_chats[next(iter(st.session_state.saved_chats))]
     save_chats(st.session_state.saved_chats)
-def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
-    # ── Logo ──
-    st.markdown('''
-    <div style="padding:2px 0 18px;">
-        <div class="sb-logo">Draft <span>AI</span></div>
-        <div style="font-family:'DM Mono',monospace;font-size:9px;color:rgba(255,255,255,0.15);
-                    letter-spacing:0.12em;text-transform:uppercase;margin-top:2px;">
-            Engineering Intelligence
-        </div>
-    </div>
-    <div style="height:1px;background:linear-gradient(90deg,rgba(249,115,22,0.25),rgba(255,255,255,0.04),transparent);
-                margin-bottom:18px;"></div>
-    ''', unsafe_allow_html=True)
 
-    # ── Navigation ──
+
+def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
+    """Render navigation and chat controls in either the sidebar or a popover."""
+    st.markdown('<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
     nav_items = [
-        ("📐  Analyze Drawing", "analyze"),
-        ("📦  Batch Analysis",  "batch"),
-        ("📂  Drawing Library",  "library"),
-        ("📋  BOM Generator",   "bom"),
-        ("✅  Standards Check",  "standards"),
+        ("Analyze Drawing", "analyze"),
+        ("Batch Analysis", "batch"),
+        ("Drawing Library", "library"),
+        ("BOM Generator", "bom"),
+        ("Standards Checker", "standards"),
+        ("3D → 2D", "cad3d"),
     ]
     for label, tab in nav_items:
         if st.button(label, key=f"{key_prefix}_{tab}", use_container_width=True):
             st.session_state.active_tab = tab
             st.rerun()
 
+    st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
+    count = len(st.session_state.saved_chats)
+    st.markdown(f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>', unsafe_allow_html=True)
+    _ip = get_client_ip()
+    _, _rem, _ = check_rate_limit(_ip)
+    st.markdown(f'<div class="sb-quota">Requests left: <span>{_rem}</span> / {MAX_REQUESTS_PER_IP} this hour</div>', unsafe_allow_html=True)
 
-    # ── Divider ──
-    st.markdown('''
-    <div style="height:1px;background:rgba(255,255,255,0.05);margin:4px 0 16px;"></div>
-    ''', unsafe_allow_html=True)
-
-    # ── Chat History ──
-    st.markdown('''
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <span style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.14em;
-                     text-transform:uppercase;color:rgba(255,255,255,0.2);">Chat History</span>
-        <span style="font-family:'DM Mono',monospace;font-size:9px;color:rgba(249,115,22,0.5);
-                     letter-spacing:0.04em;">''' + str(len(st.session_state.saved_chats)) + f''' / {MAX_CHATS}</span>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    if st.button("＋  New Chat", key=f"{key_prefix}_new_chat", use_container_width=True):
+    if st.button("+ New Chat", key=f"{key_prefix}_new_chat", use_container_width=True):
         st.session_state.chat_history = []
         st.session_state.messages_display = []
         st.session_state.current_drawing_name = None
@@ -389,12 +282,13 @@ def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
     if not include_saved_chats:
         return
 
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     if not st.session_state.saved_chats:
-        st.markdown('''
-        <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.1);
-                    padding:8px 0;text-align:center;">No chats yet</div>
-        ''', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-size:11px;color:rgba(255,255,255,0.12);'
+            'font-family:\'JetBrains Mono\',monospace;padding:4px 0;">No chats yet.</div>',
+            unsafe_allow_html=True,
+        )
         return
 
     for name in reversed(list(st.session_state.saved_chats.keys())):
@@ -409,15 +303,14 @@ def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
                 st.session_state.active_tab = "analyze"
                 st.rerun()
         with cd:
-            if st.button("✕", key=f"{key_prefix}_del_{name}", use_container_width=True):
+            if st.button("X", key=f"{key_prefix}_del_{name}", use_container_width=True):
                 del st.session_state.saved_chats[name]
                 save_chats(st.session_state.saved_chats)
                 st.rerun()
 
 
-
 # ------------------------------------------------------------------
-# MESSAGE FORMATTER  Convert AI text to styled HTML bubbles
+# MESSAGE FORMATTER � Convert AI text to styled HTML bubbles
 # ------------------------------------------------------------------
 
 def fmt(text):
@@ -720,63 +613,100 @@ html, body {
 }
 .top-bar-file .dot { color: #22c55e; margin-right: 5px; }
 
+/* ── SIDEBAR TOGGLE ── */
+[data-testid="collapsedControl"] {
+    display: none !important;
+}
+[data-testid="stSidebarCollapseButton"] { display: none !important; }
+
+
+/* ── SIDEBAR COLLAPSE ARROW ── */
+/* Hide the default text/icon and replace with clean arrow */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {
+    background: #0d0d0d !important;
+    border: 1px solid rgba(249,115,22,0.25) !important;
+    border-radius: 0 8px 8px 0 !important;
+    width: 24px !important;
+    height: 48px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: fixed !important;
+    top: 50% !important;
+    left: 0 !important;
+    transform: translateY(-50%) !important;
+    z-index: 99999 !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover,
+[data-testid="collapsedControl"]:hover {
+    background: rgba(249,115,22,0.12) !important;
+    border-color: rgba(249,115,22,0.5) !important;
+    width: 28px !important;
+}
+[data-testid="stSidebarCollapsedControl"] svg,
+[data-testid="collapsedControl"] svg {
+    color: #f97316 !important;
+    fill: #f97316 !important;
+    width: 14px !important;
+    height: 14px !important;
+}
+
+/* The expand/collapse button inside the sidebar */
+[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"],
+[data-testid="stSidebar"] button[aria-label="close sidebar"],
+[data-testid="stSidebar"] button[aria-label="Close sidebar"],
+[data-testid="stSidebar"] button[kind="header"] {
+    background: transparent !important;
+    border: 1px solid rgba(249,115,22,0.2) !important;
+    border-radius: 0 8px 8px 0 !important;
+    color: #f97316 !important;
+    width: 24px !important;
+    height: 48px !important;
+    position: fixed !important;
+    left: 238px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    z-index: 99999 !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"]:hover,
+[data-testid="stSidebar"] button[aria-label="close sidebar"]:hover {
+    background: rgba(249,115,22,0.1) !important;
+    border-color: #f97316 !important;
+}
+[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"] svg,
+[data-testid="stSidebar"] button[aria-label="close sidebar"] svg {
+    color: #f97316 !important;
+    fill: #f97316 !important;
+}
+
 /* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
     background: #0d0d0d !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
-    min-width: 260px !important;
-    max-width: 260px !important;
+    min-width: 300px !important;
+    max-width: 300px !important;
+    transform: translateX(0) !important;
+    margin-left: 0 !important;
+    visibility: visible !important;
+}
+[data-testid="stSidebar"][aria-expanded="false"] {
+    min-width: 300px !important;
+    max-width: 300px !important;
+    transform: translateX(0) !important;
+    margin-left: 0 !important;
+    visibility: visible !important;
 }
 [data-testid="stSidebar"] > div:first-child { padding: 24px 14px !important; }
 
-/* Kill the reddish bleed when sidebar is collapsed */
-[data-testid="stSidebarContent"] {
-    background: #0d0d0d !important;
-}
-section[data-testid="stSidebar"][aria-expanded="false"] {
-    background: transparent !important;
-    border-right: none !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: visible !important;
-}
-/* Streamlit app background behind sidebar area */
-[data-testid="stAppViewContainer"] > section:first-child {
-    background: #0b0b0b !important;
-}
-
-/* Hide Streamlit's native sidebar toggle buttons — replaced by JS button */
-[data-testid="stSidebarCollapseButton"],
-[data-testid="collapsedControl"] {
-    display: none !important;
-}
-
-/* ── Custom sidebar toggle button injected by JS ── */
-#custom-sidebar-toggle {
-    position: fixed !important;
-    top: 14px !important;
-    left: 14px !important;
-    z-index: 999999 !important;
-    width: 34px !important;
-    height: 34px !important;
-    background: rgba(13,13,13,0.88) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    color: rgba(255,255,255,0.65) !important;
-    font-size: 18px !important;
-    cursor: pointer !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    transition: color 0.15s, background 0.15s, border-color 0.15s !important;
-    line-height: 1 !important;
-    padding: 0 !important;
-}
-#custom-sidebar-toggle:hover {
-    color: #f97316 !important;
-    background: rgba(249,115,22,0.1) !important;
-    border-color: rgba(249,115,22,0.3) !important;
-}
 .sb-logo { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.04em; color: #fff; margin-top: -6px; margin-bottom: 1px; }
 .sb-logo span { color: #f97316; }
 .sb-sub  { font-size: 9px; color: rgba(255,255,255,0.15); font-family: 'DM Mono', monospace; letter-spacing: 0.1em; margin-bottom: 20px; text-transform: uppercase; }
@@ -789,27 +719,25 @@ section[data-testid="stSidebar"][aria-expanded="false"] {
 .sb-quota      { font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.15); margin-bottom: 8px; padding-left: 2px; }
 .sb-quota span { color: #f97316; font-weight: 600; }
 
-/* Sidebar nav — hide the Streamlit nav buttons (handled by custom HTML above them) */
+/* Sidebar nav — ghost buttons with active-state left bar */
 [data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-    color: rgba(255,255,255,0.35) !important;
-    border-radius: 8px !important;
+    border: 1px solid transparent !important;
+    color: rgba(255,255,255,0.4) !important;
+    border-radius: 7px !important;
     font-family: 'Syne', sans-serif !important;
     font-size: 12px !important; font-weight: 500 !important;
     padding: 8px 12px !important; width: 100% !important;
     text-align: left !important; margin-bottom: 1px !important;
-    transition: all 0.2s !important;
+    transition: all 0.15s !important;
     height: auto !important; min-height: unset !important; max-height: unset !important;
     justify-content: flex-start !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(249,115,22,0.06) !important;
-    border-color: rgba(249,115,22,0.15) !important;
+    background: rgba(249,115,22,0.07) !important;
+    border-color: rgba(249,115,22,0.12) !important;
     color: #f97316 !important;
 }
-
-
 
 /* ── GEAR SPIN ── */
 @keyframes spinGear { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -1111,168 +1039,6 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
     background: rgba(255,255,255,0.16) !important;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   DARK THEME OVERRIDES — Force ALL Streamlit widgets dark
-   ══════════════════════════════════════════════════════════════ */
-
-/* ── Text area (chat input) — ultra-aggressive ── */
-.stTextArea textarea,
-.stTextArea > div > div > textarea,
-textarea[data-testid="stTextAreaWidget"],
-div[data-testid="stTextArea"] textarea,
-.stTextArea div,
-div[data-testid="stTextArea"] > div,
-div[data-testid="stTextArea"] > div > div {
-    background: rgba(11,11,11,0.95) !important;
-    background-color: rgba(11,11,11,0.95) !important;
-}
-.stTextArea textarea,
-.stTextArea > div > div > textarea,
-textarea[data-testid="stTextAreaWidget"],
-div[data-testid="stTextArea"] textarea {
-    color: rgba(255,255,255,0.9) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    border-radius: 10px !important;
-    caret-color: #f97316 !important;
-}
-.stTextArea textarea:focus,
-textarea[data-testid="stTextAreaWidget"]:focus {
-    border-color: rgba(249,115,22,0.4) !important;
-    box-shadow: 0 0 0 1px rgba(249,115,22,0.15) !important;
-    background: rgba(255,255,255,0.04) !important;
-}
-.stTextArea textarea::placeholder {
-    color: rgba(255,255,255,0.2) !important;
-}
-
-/* ── Text input (search boxes, etc.) ── */
-.stTextInput input,
-input[data-testid="stTextInputWidget"],
-.stTextInput > div > div > input {
-    background: rgba(255,255,255,0.03) !important;
-    color: rgba(255,255,255,0.9) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    border-radius: 8px !important;
-    caret-color: #f97316 !important;
-}
-.stTextInput input:focus,
-input[data-testid="stTextInputWidget"]:focus {
-    border-color: rgba(249,115,22,0.4) !important;
-    box-shadow: 0 0 0 1px rgba(249,115,22,0.15) !important;
-    background: rgba(255,255,255,0.04) !important;
-}
-.stTextInput input::placeholder {
-    color: rgba(255,255,255,0.2) !important;
-}
-
-/* ── Buttons (non-primary — Clear, Export, analysis chips) ── */
-.stButton > button:not([kind="primary"]),
-button[data-testid="baseButton-secondary"],
-button[data-testid="baseButton-minimal"] {
-    background: rgba(255,255,255,0.04) !important;
-    color: rgba(255,255,255,0.8) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-}
-.stButton > button:not([kind="primary"]):hover,
-button[data-testid="baseButton-secondary"]:hover {
-    background: rgba(249,115,22,0.08) !important;
-    border-color: rgba(249,115,22,0.2) !important;
-    color: #f97316 !important;
-}
-
-/* ── File uploader — dark dropzone ── */
-[data-testid="stFileUploader"] section,
-[data-testid="stFileUploader"] section > div,
-[data-testid="stFileUploadDropzone"],
-[data-testid="stFileUploader"] > section > button {
-    background: rgba(255,255,255,0.02) !important;
-    background-color: rgba(255,255,255,0.02) !important;
-}
-[data-testid="stFileUploadDropzone"] {
-    border: 1.5px dashed rgba(249,115,22,0.18) !important;
-    background: rgba(249,115,22,0.02) !important;
-    border-radius: 10px !important;
-}
-[data-testid="stFileUploadDropzone"]:hover {
-    border-color: rgba(249,115,22,0.4) !important;
-    background: rgba(249,115,22,0.04) !important;
-}
-/* Browse files button inside uploader */
-[data-testid="stFileUploadDropzone"] button,
-[data-testid="baseButton-secondary"] {
-    background: rgba(249,115,22,0.08) !important;
-    border: 1px solid rgba(249,115,22,0.22) !important;
-    color: #f97316 !important;
-}
-/* Small text inside dropzone */
-[data-testid="stFileUploadDropzone"] small,
-[data-testid="stFileUploadDropzone"] span {
-    color: rgba(255,255,255,0.25) !important;
-}
-
-/* ── Selectbox / dropdown ── */
-.stSelectbox > div > div,
-[data-testid="stSelectbox"] > div > div,
-.stMultiSelect > div > div {
-    background: rgba(255,255,255,0.03) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    color: rgba(255,255,255,0.9) !important;
-}
-
-/* ── Download button ── */
-[data-testid="stDownloadButton"] button,
-.stDownloadButton button {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    color: rgba(255,255,255,0.8) !important;
-}
-[data-testid="stDownloadButton"] button:hover,
-.stDownloadButton button:hover {
-    background: rgba(249,115,22,0.08) !important;
-    border-color: rgba(249,115,22,0.2) !important;
-    color: #f97316 !important;
-}
-
-/* ── Chips / Suggestion buttons ── */
-[data-testid="stChatMessage"] button,
-button[kind="secondary"] {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    color: rgba(255,255,255,0.7) !important;
-}
-
-/* ── Number input ── */
-.stNumberInput input {
-    background: rgba(255,255,255,0.03) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    color: rgba(255,255,255,0.9) !important;
-}
-
-/* ── Checkbox ── */
-[data-testid="stCheckbox"] label span {
-    color: rgba(255,255,255,0.8) !important;
-}
-
-/* ── Global: kill any remaining white backgrounds on inner divs ── */
-[data-testid="stForm"],
-[data-testid="stExpander"] details,
-[data-testid="stExpander"] summary {
-    background: transparent !important;
-    border-color: rgba(255,255,255,0.06) !important;
-}
-
-/* ── Remove white background from Streamlit's main container sections ── */
-.main .block-container,
-[data-testid="stAppViewBlockContainer"] {
-    background: transparent !important;
-}
-
-/* ── Uploaded file info row ── */
-[data-testid="stFileUploader"] [data-testid="stMarkdown"],
-[data-testid="stFileUploader"] small {
-    color: rgba(255,255,255,0.4) !important;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -1299,12 +1065,11 @@ for k, v in [
     ("current_drawing_name", None),
     ("title_block_data",     None),
     ("active_tab",           "analyze"),
-    ("show_revision_panel",  False),
+        ("show_revision_panel",  False),
     ("uploader_key",         0),
     ("batch_results",        []),
     ("batch_running",        False),
     ("standards_result",     None),
-    ("user_tier",            "free"),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -1313,51 +1078,12 @@ if "saved_chats" not in st.session_state:
     st.session_state.saved_chats = load_chats()
 
 
-
-
-
 # ------------------------------------------------------------------
 # SIDEBAR
 # ------------------------------------------------------------------
 
 with st.sidebar:
     render_navigation_panel("sidebar")
-
-
-
-# Re-inject sidebar toggle on every rerun so it works across all tabs.
-# Removing and re-adding the button ensures onclick always calls the live iframe.
-import streamlit.components.v1 as _components
-_components.html("""
-<script>
-(function() {
-    function clickNativeToggle() {
-        var doc = window.parent.document;
-        // Try collapse button (sidebar open) then expand button (sidebar closed)
-        var b = doc.querySelector('[data-testid="stSidebarCollapseButton"] button')
-             || doc.querySelector('[data-testid="collapsedControl"] button');
-        if (b) { b.click(); }
-    }
-    function inject() {
-        var doc = window.parent.document;
-        // Always remove stale button so this rerun's fresh onclick is wired up
-        var existing = doc.getElementById('custom-sidebar-toggle');
-        if (existing) existing.remove();
-        var btn = doc.createElement('button');
-        btn.id = 'custom-sidebar-toggle';
-        btn.innerHTML = '&#9776;';
-        btn.setAttribute('title', 'Toggle sidebar');
-        btn.addEventListener('click', clickNativeToggle);
-        doc.body.appendChild(btn);
-    }
-    // Run immediately and after a short delay to survive slow renders
-    inject();
-    setTimeout(inject, 600);
-})();
-</script>
-""", height=1, scrolling=False)
-
-
 
 
 # ------------------------------------------------------------------
@@ -1370,13 +1096,11 @@ _file_pill = (
     f'''<div class="top-bar-file"><span class="dot">●</span>{_fname}</div>'''
     if _fname else ""
 )
-_tier = get_tier_config()
-_tier_pill = f'''<div class="top-bar-badge" style="background:{_tier['bg']};border-color:{_tier['border']};color:{_tier['color']};">{_tier['label']}</div>'''
 st.markdown(f"""
 <div class="top-bar">
   <div class="top-bar-left">
     <div class="top-bar-logo">Draft<span> AI</span></div>
-    {_tier_pill}
+    <div class="top-bar-badge">Beta</div>
     {_file_pill}
   </div>
   <div style="font-family:DM Mono,monospace;font-size:10px;color:rgba(255,255,255,0.15);letter-spacing:0.06em;">
@@ -1569,7 +1293,7 @@ border-radius:8px;padding:12px 14px;text-align:center;">
                 st.rerun()
 
     # ── Quick question bar for batch tab ──
-    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;·&nbsp; © 2026 &nbsp;·&nbsp; Pricing &nbsp;·&nbsp; Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;|&nbsp; Made with ♥ by Rishi</div>', unsafe_allow_html=True)
     st.markdown('<div class="sticky-wrap"><div class="sticky-inner">', unsafe_allow_html=True)
     batch_q = st.text_area("batchq", placeholder="Ask anything about the drawing...", label_visibility="collapsed", height=52, key="batch_chat_input")
     bq_col1, bq_col2 = st.columns([5, 1], gap="small")
@@ -1792,7 +1516,7 @@ elif st.session_state.active_tab == "bom":
                 st.rerun()
 
     # ── Quick question bar for BOM tab ──
-    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;·&nbsp; © 2026 &nbsp;·&nbsp; Pricing &nbsp;·&nbsp; Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;|&nbsp; Made with ♥ by Rishi</div>', unsafe_allow_html=True)
     st.markdown('<div class="sticky-wrap"><div class="sticky-inner">', unsafe_allow_html=True)
     bom_q = st.text_area("bomq", placeholder="Ask anything about the drawing...", label_visibility="collapsed", height=52, key="bom_chat_input")
     bomq_col1, bomq_col2 = st.columns([5, 1], gap="small")
@@ -1990,7 +1714,21 @@ elif st.session_state.active_tab == "standards":
                 ip = get_client_ip()
                 allowed, remaining, mins_left = check_rate_limit(ip)
                 if not allowed:
-                    render_upgrade_prompt(mins_left)
+                    st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
                 else:
                     with st.spinner("Checking drawing against standards..."):
                         std_file.seek(0)
@@ -2091,7 +1829,152 @@ elif st.session_state.active_tab == "standards":
             st.session_state.standards_result = None
             st.rerun()
 
-    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;·&nbsp; © 2026 &nbsp;·&nbsp; Pricing &nbsp;·&nbsp; Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;|&nbsp; Made with ♥ by Rishi</div>', unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------------
+# TAB: 3D → 2D CONVERTER
+# ------------------------------------------------------------------
+
+elif st.session_state.active_tab == "cad3d":
+
+    from cad_converter import is_addin_running, prepare_and_export, load_results, OUTPUT_DIR
+
+    st.markdown("""
+<style>
+.cad-hero{text-align:center;padding:28px 0 16px;}
+.cad-hero h1{font-family:'Syne',sans-serif;font-size:30px;font-weight:800;color:#fff;margin:0 0 6px;letter-spacing:-0.03em;}
+.cad-hero h1 span{color:#f97316;}
+.cad-hero p{font-family:'DM Mono',monospace;font-size:11px;color:rgba(255,255,255,0.3);letter-spacing:0.06em;}
+.addin-status{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;font-family:'DM Mono',monospace;font-size:11px;margin-bottom:16px;}
+.addin-on{background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);color:#22c55e;}
+.addin-off{background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);color:#f97316;}
+.install-card{background:#111;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:20px 24px;margin-bottom:12px;}
+.install-step{font-family:'DM Mono',monospace;font-size:11px;color:rgba(255,255,255,0.4);line-height:2.2;}
+.install-step strong{color:#fff;}
+.install-step code{background:rgba(249,115,22,0.1);color:#f97316;padding:2px 6px;border-radius:4px;}
+</style>
+""", unsafe_allow_html=True)
+
+    st.markdown("""
+<div class="cad-hero">
+  <h1>3D → <span>2D</span> Converter</h1>
+  <p>SOLIDWORKS ADD-IN · EXACT DIMENSIONS · PROFESSIONAL VIEWS</p>
+</div>""", unsafe_allow_html=True)
+
+    # Check add-in status
+    addin_ok = is_addin_running()
+
+    if addin_ok:
+        st.markdown('<div class="addin-status addin-on">⚡ SolidWorks Add-in connected · Ready</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="addin-status addin-off">⚠️ SolidWorks Add-in not detected · Install it below</div>', unsafe_allow_html=True)
+
+        with st.expander("📦  Install the Draft AI SolidWorks Add-in", expanded=True):
+            st.markdown("""
+<div class="install-card">
+  <div style="font-family:'Syne',sans-serif;font-weight:700;color:#f97316;margin-bottom:12px;">
+    One-time setup — takes ~5 minutes
+  </div>
+  <div class="install-step">
+    <strong>1.</strong> Download the add-in folder above (DraftAI_Addin.zip)<br>
+    <strong>2.</strong> Open <code>DraftAI_Addin.csproj</code> in Visual Studio <strong>as Administrator</strong><br>
+    <strong>3.</strong> Set platform to <code>x64</code>, then <strong>Build → Build Solution</strong><br>
+    <strong>4.</strong> Right-click <code>register_addin.reg</code> → <strong>Merge</strong> (run as Admin)<br>
+    <strong>5.</strong> Open SolidWorks → <strong>Tools → Add-Ins</strong> → enable <strong>Draft AI</strong><br>
+    <strong>6.</strong> Come back here — this page will show ⚡ Connected
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.info("Once the add-in is installed, just keep SolidWorks open and upload files here.")
+
+    # Upload section (always visible)
+    st.markdown("<br>", unsafe_allow_html=True)
+    cad_file = st.file_uploader(
+        "Upload CAD file",
+        type=["step","stp","iges","igs","stl"],
+        label_visibility="collapsed",
+        key="cad_uploader"
+    )
+    st.markdown('<div style="text-align:center;font-family:DM Mono,monospace;font-size:11px;color:rgba(255,255,255,0.2);padding:6px 0 16px;">↑ STEP · STP · IGES · IGS · STL</div>', unsafe_allow_html=True)
+
+    if cad_file and addin_ok:
+        if st.button("⚡  Generate 2D Views via SolidWorks", use_container_width=True, key="cad_gen_btn"):
+            with st.spinner("SolidWorks is processing your file..."):
+                try:
+                    result = prepare_and_export(cad_file.read(), cad_file.name)
+                    st.session_state["cad_result"] = result
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    elif cad_file and not addin_ok:
+        st.warning("Install the SolidWorks add-in first, then upload your file.")
+
+    # ── Results ──
+    if "cad_result" in st.session_state and st.session_state["cad_result"]:
+        result = st.session_state["cad_result"]
+        views  = result["views"]
+        dims   = result.get("dimensions", {})
+
+        st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:24px 0'>", unsafe_allow_html=True)
+
+        # Backend badge
+        st.markdown(f'''<div style="display:inline-flex;align-items:center;gap:8px;
+background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);
+border-radius:6px;padding:5px 12px;font-family:DM Mono,monospace;
+font-size:10px;color:#22c55e;letter-spacing:0.06em;margin-bottom:16px;">
+⚡ {result.get("backend","SolidWorks")} · Exact dimensions
+</div>''', unsafe_allow_html=True)
+
+        # Dimensions
+        if dims and "error" not in dims:
+            st.markdown('<div style="font-family:DM Mono,monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.2);margin-bottom:10px;">Part Dimensions</div>', unsafe_allow_html=True)
+            d1,d2,d3,d4 = st.columns(4)
+            for col,label,val in [
+                (d1,"LENGTH (X)",f"{dims.get('length','—')} mm"),
+                (d2,"WIDTH (Y)", f"{dims.get('width','—')} mm"),
+                (d3,"HEIGHT (Z)",f"{dims.get('height','—')} mm"),
+                (d4,"SOURCE",    dims.get("source","SolidWorks")),
+            ]:
+                with col:
+                    st.markdown(f'<div style="background:#111;border:1px solid rgba(249,115,22,0.2);border-radius:10px;padding:14px 12px;text-align:center;"><div style="font-family:DM Mono,monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.25);margin-bottom:6px;">{label}</div><div style="font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:#f97316;">{val}</div></div>', unsafe_allow_html=True)
+
+        # Views
+        st.markdown('<div style="font-family:DM Mono,monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.2);margin:20px 0 10px;">Generated Views</div>', unsafe_allow_html=True)
+        col1,col2 = st.columns(2)
+        for idx,(vkey,vdata) in enumerate(views.items()):
+            col = col1 if idx%2==0 else col2
+            with col:
+                st.markdown('<div style="background:#111;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:16px;margin-bottom:12px;">', unsafe_allow_html=True)
+                if vdata.get("png"):
+                    b64 = base64.b64encode(vdata["png"]).decode()
+                    st.markdown(f'<img src="data:image/png;base64,{b64}" style="width:100%;border-radius:6px;">', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div style="color:rgba(255,255,255,0.2);padding:40px;text-align:center;">{vdata.get("error","No view")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-top:8px;text-align:center;">{vdata["label"]}</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        # Downloads
+        import zipfile
+        dl1,_,dl3 = st.columns(3)
+        with dl1:
+            zbuf = io.BytesIO()
+            with zipfile.ZipFile(zbuf,"w") as zf:
+                for vk,vd in views.items():
+                    if vd.get("png"): zf.writestr(f"{vk}.png", vd["png"])
+            st.download_button("⬇ PNG Views (.zip)", zbuf.getvalue(),
+                               f"{Path(result['filename']).stem}_views.zip",
+                               "application/zip", use_container_width=True, key="dl_png")
+        with dl3:
+            st.download_button("⬇ PDF Drawing Sheet", result["pdf"],
+                               f"{Path(result['filename']).stem}_drawing.pdf",
+                               "application/pdf", use_container_width=True, key="dl_pdf")
+
+        if st.button("🗑 Clear", key="cad_clear"):
+            del st.session_state["cad_result"]
+            st.rerun()
 
 
 # ------------------------------------------------------------------
@@ -2282,7 +2165,7 @@ else:
                         unsafe_allow_html=True,
                     )
 
-    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;·&nbsp; © 2026 &nbsp;·&nbsp; Pricing &nbsp;·&nbsp; Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer-txt" style="margin-top:20px;">Draft <span>AI</span> &nbsp;|&nbsp; Made with ♥ by Rishi</div>', unsafe_allow_html=True)
 
     # -- Bottom input bar --
     st.markdown("""
@@ -2381,7 +2264,21 @@ else:
             ip = get_client_ip()
             allowed, remaining, mins_left = check_rate_limit(ip)
             if not allowed:
-                render_upgrade_prompt(mins_left)
+                st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
             else:
                 spinner_msg, user_label = ACTION_MAP[special_action]
                 with st.spinner(spinner_msg):
@@ -2440,7 +2337,21 @@ else:
             ip = get_client_ip()
             allowed, remaining, mins_left = check_rate_limit(ip)
             if not allowed:
-                render_upgrade_prompt(mins_left)
+                st.markdown(f"""
+<div style="background:rgba(249,115,22,0.07);border:1px solid rgba(249,115,22,0.25);border-radius:12px;padding:16px 20px;margin:8px 0;">
+    <div style="font-size:15px;margin-bottom:6px;">🪫 Whoa, easy there!</div>
+    <div style="font-family:'Syne',sans-serif;font-size:13px;color:rgba(255,255,255,0.85);line-height:1.7;margin-bottom:10px;">
+        You've hit the <b style="color:#f97316;">2 requests/hour</b> free limit.<br>
+        Honestly? We're running on <b>dreams and ramen</b> over here. 🍜<br>
+        Every API call costs us money and our wallets are crying. 😭<br><br>
+        If you're enjoying Draft AI, consider buying us a coffee — or just a cup of water at this point.<br>
+        We'll use it to raise your limit, we promise. XOXO 🧡
+    </div>
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.05em;">
+        ⏱ Try again in ~{mins_left} min &nbsp;·&nbsp; Or donate and get more — coming soon
+    </div>
+</div>
+""", unsafe_allow_html=True)
             else:
                 with st.spinner("Analyzing..."):
                     uploaded_file.seek(0)
