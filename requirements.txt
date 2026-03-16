@@ -71,4 +71,4 @@ uritemplate==4.2.0
 urllib3==2.6.3
 watchdog==6.0.0
 pdf2image
-python-dotenv
+svglib==1.5.1
