@@ -195,10 +195,7 @@ OPENAI_API_KEY=sk-your-key-here
 - [x] SolidWorks add-in with Ctrl+Shift+A hotkey
 - [x] 3D → 2D converter — STEP to professional drawing sheet
 - [x] Cloud proxy — no API key needed for users
-- [ ] Gemini + Claude multi-model vision pipeline
-- [ ] Per-entity constraint suggestions in sketch analyzer
-- [ ] User authentication + free / pro tiers
-- [ ] SolidWorks Marketplace listing
+- [ ] Shhh... i'm cooking it 
 
 ---
 
