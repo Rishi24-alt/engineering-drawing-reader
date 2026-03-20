@@ -1950,11 +1950,19 @@ elif st.session_state.active_tab == "standards":
         if is_3d:
             from cad_converter import is_addin_running, is_addin_online_cloud, prepare_and_export
 
-            addin_ok = is_addin_running()
+            addin_local = is_addin_running()
+            addin_cloud = is_addin_online_cloud() if not addin_local else False
+            addin_ok    = addin_local or addin_cloud
             st.session_state.addin_ok_cache = addin_ok
-            if addin_ok:
+
+            if addin_local:
                 st.markdown(
-                    '<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:8px 14px;font-family:DM Mono,monospace;font-size:11px;color:#22c55e;margin-bottom:10px;">⚡ SolidWorks Add-in connected · Ready</div>',
+                    '<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:8px 14px;font-family:DM Mono,monospace;font-size:11px;color:#22c55e;margin-bottom:10px;">⚡ SolidWorks Add-in connected locally · Ready</div>',
+                    unsafe_allow_html=True,
+                )
+            elif addin_cloud:
+                st.markdown(
+                    '<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:8px 14px;font-family:DM Mono,monospace;font-size:11px;color:#22c55e;margin-bottom:10px;">☁️ SolidWorks Add-in connected via cloud · Ready</div>',
                     unsafe_allow_html=True,
                 )
             else:
@@ -1983,7 +1991,7 @@ elif st.session_state.active_tab == "standards":
 
             if run_3d:
                 if not addin_ok:
-                    st.error("Cannot analyze — SolidWorks add-in is not running.")
+                    st.error("⚠️ SolidWorks Add-in not detected. Open SolidWorks with Draft AI add-in loaded and try again.")
                 else:
                     with st.spinner("SolidWorks is opening and analyzing your file..."):
                         try:
