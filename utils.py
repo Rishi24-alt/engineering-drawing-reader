@@ -54,9 +54,11 @@ def pdf_to_image_bytes(pdf_file, page=0, dpi=200):
 PROXY_URL = os.getenv("PROXY_URL", "https://web-production-a87eb.up.railway.app")
 
 if openai:
+    # OpenAI SDK automatically appends /v1 to base_url
+    # So set base_url WITHOUT /v1
     client = openai.OpenAI(
-        api_key="draft-ai-proxy",
-        base_url=PROXY_URL
+        api_key=os.getenv("OPENAI_API_KEY", "draft-ai-proxy"),
+        base_url=PROXY_URL.rstrip("/") + "/"
     )
 else:
     client = None
