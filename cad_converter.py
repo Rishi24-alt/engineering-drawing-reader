@@ -10,6 +10,7 @@ import io
 import json
 import time
 import uuid
+import re
 import base64
 import urllib.request
 from pathlib import Path
@@ -51,6 +52,14 @@ def _json_from_value(raw_value, context: str, default=None):
     except json.JSONDecodeError as e:
         preview = text[:180].replace("\n", " ")
         raise ValueError(f"{context} is not valid JSON: {preview}") from e
+
+
+def _sanitize_user_token(user_token: str) -> str:
+    """Keep user token predictable and URL-safe for relay matching."""
+    if not user_token:
+        return ""
+    clean = re.sub(r"[^A-Za-z0-9_-]", "", user_token.strip())
+    return clean[:64]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -147,9 +156,13 @@ def _get_dedicated_addin(user_session: str) -> str:
     return addin_id
 
 
-def prepare_and_export_cloud(file_bytes: bytes, filename: str) -> dict:
-    """Upload file to cloud relay — user gets their own dedicated add-in instance."""
-    user_session = str(uuid.uuid4())[:12]
+def prepare_and_export_cloud(file_bytes: bytes, filename: str, user_token: str = "") -> dict:
+    """Upload file to cloud relay using strict per-user add-in pairing."""
+    user_session = _sanitize_user_token(user_token)
+    if not user_session:
+        raise RuntimeError(
+            "Pairing code required. Enter your add-in pairing code before running cloud analyze."
+        )
     session_id   = str(uuid.uuid4())[:12]
     b64          = base64.b64encode(file_bytes).decode()
 
@@ -157,8 +170,12 @@ def prepare_and_export_cloud(file_bytes: bytes, filename: str) -> dict:
     addin_id = _get_dedicated_addin(user_session)
     if not addin_id:
         raise RuntimeError(
-            "No SolidWorks add-in is currently available. "
-            "Please open SolidWorks with the Draft AI add-in loaded and try again."
+            "No paired SolidWorks add-in found for this pairing code. "
+            "Open SolidWorks on the same user machine and verify pairing code matches."
+        )
+    if not addin_id.startswith(user_session + "_"):
+        raise RuntimeError(
+            "Relay pairing mismatch detected. Refusing to run on an unpaired add-in."
         )
 
     # Push job directly to this user's add-in
@@ -205,10 +222,10 @@ def prepare_and_export_cloud(file_bytes: bytes, filename: str) -> dict:
 # Smart router — local or cloud
 # ─────────────────────────────────────────────────────────────
 
-def prepare_and_export(file_bytes: bytes, filename: str) -> dict:
+def prepare_and_export(file_bytes: bytes, filename: str, user_token: str = "") -> dict:
     if is_addin_running():
         return _prepare_and_export_local(file_bytes, filename)
-    return prepare_and_export_cloud(file_bytes, filename)
+    return prepare_and_export_cloud(file_bytes, filename, user_token=user_token)
 
 
 def _prepare_and_export_local(file_bytes: bytes, filename: str) -> dict:

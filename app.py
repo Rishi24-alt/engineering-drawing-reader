@@ -1971,6 +1971,17 @@ elif st.session_state.active_tab == "standards":
                     unsafe_allow_html=True,
                 )
 
+            pair_default = st.session_state.get("cloud_pairing_token", "")
+            pair_input = st.text_input(
+                "Pairing Code",
+                value=pair_default,
+                key="std_pairing_code",
+                help="Required for cloud relay to route jobs only to your own add-in.",
+                placeholder="Example: rishi_pc01",
+            )
+            st.session_state["cloud_pairing_token"] = pair_input.strip()
+            st.caption("Use the same code shown by your add-in (toast or `DraftAI_Output/openai_key.txt` line `USER_TOKEN=`).")
+
             fc1, fc2 = st.columns([3, 1])
             with fc1:
                 st.markdown(
@@ -1997,7 +2008,9 @@ elif st.session_state.active_tab == "standards":
                         try:
                             unified_file.seek(0)
                             sw_result = prepare_and_export(
-                                unified_file.read(), unified_file.name
+                                unified_file.read(),
+                                unified_file.name,
+                                user_token=st.session_state.get("cloud_pairing_token", ""),
                             )
                             st.session_state["step_analysis_result"] = sw_result
                             st.session_state["standards_result"] = None  # force re-run
@@ -2347,6 +2360,17 @@ elif st.session_state.active_tab == "cad3d":
     addin_ok    = addin_local or addin_cloud
     st.session_state.addin_ok_cache = addin_ok
 
+    pair_default = st.session_state.get("cloud_pairing_token", "")
+    pair_input = st.text_input(
+        "Pairing Code",
+        value=pair_default,
+        key="cad_pairing_code",
+        help="Required for cloud relay to route jobs only to your own add-in.",
+        placeholder="Example: rishi_pc01",
+    )
+    st.session_state["cloud_pairing_token"] = pair_input.strip()
+    st.caption("Use the same code shown by your add-in (toast or `DraftAI_Output/openai_key.txt` line `USER_TOKEN=`).")
+
     if addin_local:
         st.markdown(
             '<div class="addin-status addin-on">⚡ SolidWorks Add-in connected locally · Ready</div>',
@@ -2435,7 +2459,11 @@ elif st.session_state.active_tab == "cad3d":
             ):
                 with st.spinner("SolidWorks is processing your file... this may take up to 60 seconds"):
                     try:
-                        result = prepare_and_export(cad_file.read(), cad_file.name)
+                        result = prepare_and_export(
+                            cad_file.read(),
+                            cad_file.name,
+                            user_token=st.session_state.get("cloud_pairing_token", ""),
+                        )
                         st.session_state["cad_result"] = result
                         st.rerun()
                     except Exception as e:
