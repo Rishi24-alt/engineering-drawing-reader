@@ -42,6 +42,7 @@ import time
 import base64
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 
 def _normalize_pair_code(value):
@@ -69,6 +70,12 @@ def _sync_pair_code_to_query(pair_code: str):
             del st.query_params["pair"]
     except Exception:
         pass
+
+
+def _auto_connect_link() -> str:
+    app_url = os.getenv("PUBLIC_APP_URL", "https://draftaii.streamlit.app").strip()
+    app_url = app_url.rstrip("/")
+    return f"http://localhost:7432/pair?return_url={quote(app_url, safe='')}"
 
 # ------------------------------------------------------------------
 # PASSWORD PROTECTION - SELECTIVE (ONLY FOR 3D → 2D FEATURE)
@@ -2017,6 +2024,7 @@ elif st.session_state.active_tab == "standards":
             st.session_state["cloud_pairing_token"] = pair_input.strip()
             _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
             st.caption("Open `http://localhost:7432/ping` on your SolidWorks PC and paste `addin_id_cloud` exactly.")
+            st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
 
             fc1, fc2 = st.columns([3, 1])
             with fc1:
@@ -2412,6 +2420,7 @@ elif st.session_state.active_tab == "cad3d":
     st.session_state["cloud_pairing_token"] = pair_input.strip()
     _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
     st.caption("Open `http://localhost:7432/ping` on your SolidWorks PC and paste `addin_id_cloud` exactly.")
+    st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
 
     if addin_local:
         st.markdown(
