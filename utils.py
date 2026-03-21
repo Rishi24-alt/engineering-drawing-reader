@@ -35,16 +35,13 @@ def _get_gemini():
     if _gemini_model_cache is not None:
         return _gemini_model_cache
     if not _genai_available:
-        return None
+        raise ValueError("google-generativeai package not installed. Add it to requirements.txt")
     key = _get_secret("GEMINI_API_KEY")
     if not key:
-        return None
-    try:
-        genai.configure(api_key=key)
-        _gemini_model_cache = genai.GenerativeModel("gemini-2.0-flash")
-        return _gemini_model_cache
-    except Exception:
-        return None
+        raise ValueError("GEMINI_API_KEY not found. Add it to Streamlit secrets.")
+    genai.configure(api_key=key)
+    _gemini_model_cache = genai.GenerativeModel("gemini-2.0-flash")
+    return _gemini_model_cache
 
 # Keep gemini_model as a property for backwards compatibility
 gemini_model = None  # will be set on first use via _get_gemini()
