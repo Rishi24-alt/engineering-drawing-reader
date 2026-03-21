@@ -225,16 +225,13 @@ def prepare_and_export_cloud(file_bytes: bytes, filename: str, user_token: str =
 
 def prepare_and_export(file_bytes: bytes, filename: str, user_token: str = "") -> dict:
     """
-    Strict local-only mode:
-    CAD analysis must run on the same PC where SolidWorks add-in is active.
-    Cloud relay fallback is intentionally disabled to prevent cross-PC routing.
+    Secure hybrid mode:
+    - Prefer local add-in if available on this PC.
+    - Otherwise route through cloud relay to the exact paired add-in_id instance.
     """
-    if not is_addin_running():
-        raise RuntimeError(
-            "SolidWorks Add-in is not running on this PC. "
-            "Open SolidWorks with Draft AI add-in loaded, then try again."
-        )
-    return _prepare_and_export_local(file_bytes, filename)
+    if is_addin_running():
+        return _prepare_and_export_local(file_bytes, filename)
+    return prepare_and_export_cloud(file_bytes, filename, user_token=user_token)
 
 
 def _prepare_and_export_local(file_bytes: bytes, filename: str) -> dict:
