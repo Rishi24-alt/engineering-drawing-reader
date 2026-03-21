@@ -62,6 +62,17 @@ def _read_pair_code_from_query():
         return ""
 
 
+def _read_auth_intent_from_query() -> bool:
+    try:
+        raw = st.query_params.get("auth", "")
+    except Exception:
+        return False
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    token = str(raw).strip().lower()
+    return token in {"1", "true", "yes", "google", "signin", "login"}
+
+
 def _sync_pair_code_to_query(pair_code: str):
     try:
         code = _normalize_pair_code(pair_code)
@@ -270,87 +281,126 @@ def set_user_pairing(username: str, pairing_code: str):
     save_device_bindings(data)
 
 
+def _streamlit_auth_available() -> bool:
+    return all(hasattr(st, name) for name in ("login", "logout", "user"))
+
+
+def _get_streamlit_user_field(field: str):
+    try:
+        user = st.user
+    except Exception:
+        return ""
+    if user is None:
+        return ""
+    if isinstance(user, dict):
+        return str(user.get(field, "") or "").strip()
+    return str(getattr(user, field, "") or "").strip()
+
+
+def _is_authenticated() -> bool:
+    if _streamlit_auth_available():
+        try:
+            user = st.user
+            is_logged = getattr(user, "is_logged_in", None)
+            if is_logged is not None:
+                return bool(is_logged)
+            return bool(
+                _get_streamlit_user_field("email")
+                or _get_streamlit_user_field("sub")
+                or _get_streamlit_user_field("name")
+            )
+        except Exception:
+            pass
+    return bool(st.session_state.get("auth_user"))
+
+
+def _auth_identity_key() -> str:
+    if _streamlit_auth_available() and _is_authenticated():
+        email = _get_streamlit_user_field("email").lower()
+        if email:
+            return email
+        sub = _get_streamlit_user_field("sub")
+        if sub:
+            return sub
+        name = _normalize_username(_get_streamlit_user_field("name"))
+        if name:
+            return name
+    return _normalize_username(st.session_state.get("auth_user", ""))
+
+
+def _auth_display_name() -> str:
+    if _streamlit_auth_available() and _is_authenticated():
+        return (
+            _get_streamlit_user_field("email")
+            or _get_streamlit_user_field("name")
+            or "Google User"
+        )
+    return st.session_state.get("auth_user", "")
+
+
+def _do_sign_in():
+    if _streamlit_auth_available():
+        try:
+            st.login()
+            return
+        except Exception as e:
+            st.error(f"Google Sign-In is not configured yet: {e}")
+            return
+    st.error("Google Sign-In is not configured yet. Please set Streamlit OIDC.")
+
+
+def _do_sign_out():
+    st.session_state.auth_user = None
+    st.session_state.cloud_pairing_token = ""
+    _sync_pair_code_to_query("")
+    if _streamlit_auth_available():
+        try:
+            st.logout()
+            return
+        except Exception:
+            pass
+    st.rerun()
+
+
 def render_auth_panel():
-    """Render branded sign-in/sign-up page. Returns True when authenticated."""
-    user = st.session_state.get("auth_user")
-    if user:
+    """Render compact account controls in sidebar."""
+    st.markdown('<div class="sb-label">Account</div>', unsafe_allow_html=True)
+    if _is_authenticated():
+        who = _auth_display_name() or "Signed In User"
+        st.markdown(
+            f'<div class="sb-quota">Signed in as: <span>{who}</span></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign Out", key="auth_signout", use_container_width=True):
+            _do_sign_out()
         return True
 
     st.markdown(
-        """
-<div class="auth-intro">
-  <div class="auth-kicker">DRAFT AI ACCESS</div>
-  <div class="auth-title">Sign In To Continue</div>
-  <div class="auth-sub">One account. One paired machine. Reliable routing.</div>
+        '<div class="sb-quota">Sign in with Google to use Standards Checker and 3D → 2D.</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Sign In with Google", key="auth_signin_google", use_container_width=True, type="primary"):
+        _do_sign_in()
+    return False
+
+
+def render_feature_auth_gate(feature_name: str, key_prefix: str):
+    st.markdown(
+        f"""
+<div style="background:linear-gradient(135deg,rgba(249,115,22,0.09),rgba(249,115,22,0.03));
+border:1px solid rgba(249,115,22,0.2);border-radius:12px;padding:18px 20px;margin:14px 0;">
+  <div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:#fff;margin-bottom:6px;">
+    Sign In Required
+  </div>
+  <div style="font-family:DM Mono,monospace;font-size:11px;color:rgba(255,255,255,0.62);line-height:1.8;">
+    {feature_name} is protected. Sign in with Google to continue.
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
-
-    left, right = st.columns([1.15, 1], gap="large")
-
-    with left:
-        st.markdown(
-            """
-<div class="auth-feature-card">
-  <div class="auth-feature-title">Built For Real Engineering Workflows</div>
-  <div class="auth-feature-line">• Same visual language as draftai.cloud</div>
-  <div class="auth-feature-line">• Pair once, route to your own machine</div>
-  <div class="auth-feature-line">• No manual code typing every session</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    with right:
-        st.markdown(
-            """
-<div class="auth-form-card">
-  <div class="auth-form-title">Account</div>
-  <div class="auth-form-sub">Use your Draft AI account to unlock machine memory.</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-        tabs = st.tabs(["Sign In", "Create Account"])
-
-        with tabs[0]:
-            u = st.text_input("Username", key="auth_login_user", placeholder="your.username")
-            p = st.text_input("Password", type="password", key="auth_login_pass", placeholder="••••••••")
-            if st.button("Sign In", key="auth_login_btn", use_container_width=True, type="primary"):
-                ok, val = authenticate_user(u, p)
-                if ok:
-                    st.session_state.auth_user = val
-                    saved_pair = get_user_pairing(val)
-                    if saved_pair:
-                        st.session_state.cloud_pairing_token = saved_pair
-                        _sync_pair_code_to_query(saved_pair)
-                    st.rerun()
-                else:
-                    st.error(val)
-
-        with tabs[1]:
-            u = st.text_input("Choose Username", key="auth_signup_user", placeholder="your.username")
-            p1 = st.text_input("Choose Password", type="password", key="auth_signup_pass1", placeholder="minimum 8 characters")
-            p2 = st.text_input("Confirm Password", type="password", key="auth_signup_pass2", placeholder="repeat password")
-            if st.button("Create Account", key="auth_signup_btn", use_container_width=True, type="primary"):
-                if p1 != p2:
-                    st.error("Passwords do not match.")
-                else:
-                    ok, val = register_user(u, p1)
-                    if ok:
-                        st.session_state.auth_user = val
-                        st.success("Account created. You are now signed in.")
-                        st.rerun()
-                    else:
-                        st.error(val)
-
-        st.markdown(
-            '<div class="auth-form-note">Sign in once and Draft AI remembers your paired machine for this account.</div>',
-            unsafe_allow_html=True,
-        )
-    return False
+    if st.button("Sign In with Google", key=f"{key_prefix}_signin_main", use_container_width=True, type="primary"):
+        _do_sign_in()
 
 
 # ------------------------------------------------------------------
@@ -553,6 +603,8 @@ def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
     )
 
     st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
+    is_signed_in = _is_authenticated()
+    protected_tabs = {"standards", "cad3d"}
     nav_items = [
         ("Analyze Drawing", "analyze"),
         ("Batch Analysis", "batch"),
@@ -562,7 +614,12 @@ def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
         ("3D → 2D", "cad3d"),
     ]
     for label, tab in nav_items:
-        if st.button(label, key=f"{key_prefix}_{tab}", use_container_width=True):
+        button_label = (
+            f"{label} · Sign In"
+            if (tab in protected_tabs and not is_signed_in)
+            else label
+        )
+        if st.button(button_label, key=f"{key_prefix}_{tab}", use_container_width=True):
             st.session_state.active_tab = tab
             st.rerun()
 
@@ -1490,20 +1547,30 @@ if "auth_user" not in st.session_state:
 if "cloud_pairing_token" not in st.session_state:
     st.session_state.cloud_pairing_token = ""
 
+if "auth_redirect_attempted" not in st.session_state:
+    st.session_state.auth_redirect_attempted = False
+
 pair_from_query = _read_pair_code_from_query()
 if pair_from_query and pair_from_query != st.session_state.cloud_pairing_token:
     st.session_state.cloud_pairing_token = pair_from_query
 _sync_pair_code_to_query(st.session_state.cloud_pairing_token)
 
-_auth_user = st.session_state.get("auth_user")
-if _auth_user:
-    _saved_pair = get_user_pairing(_auth_user)
+if _read_auth_intent_from_query() and not _is_authenticated():
+    if not st.session_state.auth_redirect_attempted:
+        st.session_state.auth_redirect_attempted = True
+        _do_sign_in()
+elif st.session_state.auth_redirect_attempted:
+    st.session_state.auth_redirect_attempted = False
+
+_auth_key = _auth_identity_key()
+if _auth_key:
+    _saved_pair = get_user_pairing(_auth_key)
     _current_pair = _normalize_pair_code(st.session_state.cloud_pairing_token)
     if not _current_pair and _saved_pair:
         st.session_state.cloud_pairing_token = _saved_pair
         _sync_pair_code_to_query(_saved_pair)
     elif _is_valid_pairing_code(_current_pair) and _current_pair != _saved_pair:
-        set_user_pairing(_auth_user, _current_pair)
+        set_user_pairing(_auth_key, _current_pair)
 
 
 # ------------------------------------------------------------------
@@ -1511,30 +1578,8 @@ if _auth_user:
 # ------------------------------------------------------------------
 
 with st.sidebar:
-    if st.session_state.get("auth_user"):
-        render_navigation_panel("sidebar")
-        st.markdown('<div class="sb-label">Account</div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="sb-quota">Signed in as: <span>{st.session_state.get("auth_user")}</span></div>',
-            unsafe_allow_html=True,
-        )
-        if st.button("Sign Out", key="auth_signout", use_container_width=True):
-            st.session_state.auth_user = None
-            st.session_state.cloud_pairing_token = ""
-            _sync_pair_code_to_query("")
-            st.rerun()
-    else:
-        st.markdown('<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True)
-        st.markdown('<div class="sb-sub">Engineering AI Workspace</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sb-label">Account</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="sb-quota">Sign in from the main panel to continue.</div>',
-            unsafe_allow_html=True,
-        )
-
-if not st.session_state.get("auth_user"):
+    render_navigation_panel("sidebar")
     render_auth_panel()
-    st.stop()
 
 
 # ------------------------------------------------------------------
@@ -2267,6 +2312,15 @@ elif st.session_state.active_tab == "library":
 # ------------------------------------------------------------------
 
 elif st.session_state.active_tab == "standards":
+    if not _is_authenticated():
+        render_feature_auth_gate("Standards Checker", "standards")
+        st.markdown(
+            '<div style="font-family:DM Mono,monospace;font-size:10px;color:rgba(255,255,255,0.42);'
+            'margin-top:8px;">Sign in is required only for <span style="color:#f97316;">Standards Checker</span> and '
+            '<span style="color:#f97316;">3D → 2D</span>. Other tools remain open.</div>',
+            unsafe_allow_html=True,
+        )
+        st.stop()
 
     st.markdown(
         '<div class="section-label" style="margin-top:12px;">Standards Checker</div>',
@@ -2697,6 +2751,14 @@ elif st.session_state.active_tab == "standards":
 # ------------------------------------------------------------------
 
 elif st.session_state.active_tab == "cad3d":
+    if not _is_authenticated():
+        render_feature_auth_gate("3D → 2D Converter", "cad3d")
+        st.markdown(
+            '<div style="font-family:DM Mono,monospace;font-size:10px;color:rgba(255,255,255,0.42);'
+            'margin-top:8px;">Sign in with Google to unlock SolidWorks cloud pairing and 3D → 2D conversion.</div>',
+            unsafe_allow_html=True,
+        )
+        st.stop()
 
     from cad_converter import is_addin_running, is_addin_online_cloud, prepare_and_export
 
