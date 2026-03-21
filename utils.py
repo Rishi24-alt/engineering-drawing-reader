@@ -57,7 +57,7 @@ PROXY_URL   = _proxy_base.rstrip("/")
 if openai:
     client = openai.OpenAI(
         api_key=os.getenv("OPENAI_API_KEY", "draft-ai-proxy"),
-        base_url=f"{PROXY_URL}/v1/"
+        base_url=PROXY_URL
     )
 else:
     client = None
@@ -1416,22 +1416,37 @@ def check_drawing_standards(image_file):
 
 def check_drawing_standards_multiview(views_dict: dict):
     """
-    Standards compliance check using all available 2D views.
+    Standards compliance check using available 2D views.
     views_dict: {"front": bytes, "top": bytes, "side": bytes, "isometric": bytes}
-    Returns parsed JSON dict.
     """
-    import json, re
-    # Build list of (label, bytes) for available views
+    import json
+    import re
+
+    # Compress images to reduce payload size — max 800px wide
+    def compress(png_bytes):
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(io.BytesIO(png_bytes)).convert("RGB")
+            # Resize if too large
+            if img.width > 800:
+                ratio = 800 / img.width
+                img = img.resize((800, int(img.height * ratio)), PILImage.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=75)
+            return buf.getvalue()
+        except Exception:
+            return png_bytes
+
+    # Use front + top views (most informative, keep payload small)
     image_list = []
-    for vkey in ["front", "top", "side", "isometric"]:
+    for vkey in ["front", "top", "side"]:
         png = views_dict.get(vkey)
-        if png:
-            image_list.append((vkey, png))
+        if png and len(image_list) < 2:
+            image_list.append((vkey, compress(png)))
 
     if not image_list:
         raise ValueError("No view images provided")
 
-    # If only one view, fall back to single-image API
     if len(image_list) == 1:
         buf = io.BytesIO(image_list[0][1])
         buf.name = f"{image_list[0][0]}.png"
@@ -1440,9 +1455,8 @@ def check_drawing_standards_multiview(views_dict: dict):
     result = _call_vision_api_multi(
         image_list,
         STANDARDS_CHECKER_PROMPT,
-        f"You are analyzing {len(image_list)} views of the same engineering part: {', '.join(l for l,_ in image_list)}. "
-        "Perform a complete drawing standards compliance check across ALL views. "
-        "Consider each view together for a comprehensive analysis. Return structured JSON only.",
+        f"Analyze these {len(image_list)} engineering views ({', '.join(l for l,_ in image_list)}). "
+        "Perform a complete drawing standards compliance check. Return structured JSON only.",
         max_tokens=2200
     )
     clean = result.strip()
