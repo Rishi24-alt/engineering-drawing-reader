@@ -2132,9 +2132,7 @@ elif st.session_state.active_tab == "standards":
                             st.rerun()
                         except Exception as e:
                             err_msg = str(e)
-                            # Show specific error to help debug
                             st.error(f"Standards check failed: {err_msg}")
-                            st.info("💡 Make sure GEMINI_API_KEY is set in your environment variables.")
 
             if sr.get("pdf"):
                 st.download_button(

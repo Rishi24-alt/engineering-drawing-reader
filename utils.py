@@ -22,15 +22,32 @@ def _get_secret(key: str, default: str = "") -> str:
 
 try:
     import google.generativeai as genai
-    GEMINI_KEY = _get_secret("GEMINI_API_KEY")
-    if GEMINI_KEY:
-        genai.configure(api_key=GEMINI_KEY)
-        gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-    else:
-        gemini_model = None
+    _genai_available = True
 except ImportError:
-    genai        = None
-    gemini_model = None
+    genai            = None
+    _genai_available = False
+
+_gemini_model_cache = None
+
+def _get_gemini():
+    """Get Gemini model — initialized lazily on first call."""
+    global _gemini_model_cache
+    if _gemini_model_cache is not None:
+        return _gemini_model_cache
+    if not _genai_available:
+        return None
+    key = _get_secret("GEMINI_API_KEY")
+    if not key:
+        return None
+    try:
+        genai.configure(api_key=key)
+        _gemini_model_cache = genai.GenerativeModel("gemini-2.0-flash")
+        return _gemini_model_cache
+    except Exception:
+        return None
+
+# Keep gemini_model as a property for backwards compatibility
+gemini_model = None  # will be set on first use via _get_gemini()
 
 try:
     from dotenv import load_dotenv
@@ -1440,15 +1457,15 @@ def check_drawing_standards(image_file):
 
 def check_drawing_standards_multiview(views_dict: dict):
     """
-    Standards compliance check using Gemini Vision — faster, cheaper, better image reading.
+    Standards compliance check using Gemini Vision.
     Falls back to OpenAI single view if Gemini unavailable.
-    views_dict: {"front": bytes, "top": bytes, "side": bytes, "isometric": bytes}
     """
     import json
     import re
 
-    # Try Gemini first
-    if gemini_model:
+    model = _get_gemini()
+
+    if model:
         try:
             from PIL import Image as PILImage
             images = []
@@ -1457,7 +1474,6 @@ def check_drawing_standards_multiview(views_dict: dict):
                 png = views_dict.get(vkey)
                 if png:
                     img = PILImage.open(io.BytesIO(png)).convert("RGB")
-                    # Resize if too large
                     if img.width > 1024:
                         ratio = 1024 / img.width
                         img = img.resize((1024, int(img.height * ratio)))
@@ -1479,15 +1495,14 @@ Analyze ALL views together and return ONLY valid JSON. No explanation, no markdo
                 content.append(f"\n[{label} VIEW]:")
                 content.append(img)
 
-            response = gemini_model.generate_content(content)
+            response = model.generate_content(content)
             clean = response.text.strip()
             if "```" in clean:
                 clean = re.sub(r'```[a-z]*', '', clean).replace("```", "").strip()
             return json.loads(clean)
 
-        except Exception as e:
-            # Fall through to OpenAI
-            pass
+        except Exception:
+            pass  # Fall through to OpenAI
 
     # Fall back to OpenAI single front view
     front_png = views_dict.get("front")
@@ -1496,7 +1511,7 @@ Analyze ALL views together and return ONLY valid JSON. No explanation, no markdo
         buf.name = "front.png"
         return check_drawing_standards(buf)
 
-    raise ValueError("No views available for standards check")
+    raise ValueError("No views available and Gemini API key not set. Add GEMINI_API_KEY to Streamlit secrets.")
 
 
 # ══════════════════════════════════════════════════════════════════
