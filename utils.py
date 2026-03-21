@@ -1463,52 +1463,52 @@ def check_drawing_standards_multiview(views_dict: dict):
     model = _get_gemini()
 
     if model:
-        try:
-            from PIL import Image as PILImage
-            images = []
-            labels = []
-            for vkey in ["front", "top", "side", "isometric"]:
-                png = views_dict.get(vkey)
-                if png:
-                    img = PILImage.open(io.BytesIO(png)).convert("RGB")
-                    if img.width > 1024:
-                        ratio = 1024 / img.width
-                        img = img.resize((1024, int(img.height * ratio)))
-                    images.append(img)
-                    labels.append(vkey.upper())
+        from PIL import Image as PILImage
+        images = []
+        labels = []
+        for vkey in ["front", "top", "side", "isometric"]:
+            png = views_dict.get(vkey)
+            if png:
+                img = PILImage.open(io.BytesIO(png)).convert("RGB")
+                if img.width > 1024:
+                    ratio = 1024 / img.width
+                    img = img.resize((1024, int(img.height * ratio)))
+                images.append(img)
+                labels.append(vkey.upper())
 
-            if not images:
-                raise ValueError("No views available")
+        if not images:
+            raise ValueError("No views available")
 
-            prompt = f"""You are an expert engineering drawing standards checker.
+        prompt = f"""You are an expert engineering drawing standards checker.
 You are analyzing {len(images)} views of an engineering part: {', '.join(labels)}.
 
 {STANDARDS_CHECKER_PROMPT}
 
 Analyze ALL views together and return ONLY valid JSON. No explanation, no markdown."""
 
-            content = [prompt]
-            for label, img in zip(labels, images):
-                content.append(f"\n[{label} VIEW]:")
-                content.append(img)
+        content = [prompt]
+        for label, img in zip(labels, images):
+            content.append(f"\n[{label} VIEW]:")
+            content.append(img)
 
-            response = model.generate_content(content)
-            clean = response.text.strip()
-            if "```" in clean:
-                clean = re.sub(r'```[a-z]*', '', clean).replace("```", "").strip()
+        response = model.generate_content(content)
+        raw = response.text.strip()
+        clean = raw
+        if "```" in clean:
+            clean = re.sub(r'```[a-z]*', '', clean).replace("```", "").strip()
+        try:
             return json.loads(clean)
+        except json.JSONDecodeError:
+            raise ValueError(f"Gemini returned non-JSON: {raw[:200]}")
 
-        except Exception:
-            pass  # Fall through to OpenAI
-
-    # Fall back to OpenAI single front view
+    # Gemini not available — fall back to OpenAI
     front_png = views_dict.get("front")
     if front_png:
         buf = io.BytesIO(front_png)
         buf.name = "front.png"
         return check_drawing_standards(buf)
 
-    raise ValueError("No views available and Gemini API key not set. Add GEMINI_API_KEY to Streamlit secrets.")
+    raise ValueError("No views available for standards check")
 
 
 # ══════════════════════════════════════════════════════════════════
