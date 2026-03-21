@@ -5,6 +5,7 @@
 # +------------------------------------------------------------------+
 
 import streamlit as st
+import streamlit.components.v1 as components
 from utils import (
     analyze_drawing,
     generate_pdf,
@@ -89,6 +90,143 @@ def _auto_connect_link() -> str:
     app_url = os.getenv("PUBLIC_APP_URL", "https://draftaii.streamlit.app").strip()
     app_url = app_url.rstrip("/")
     return f"http://localhost:7432/pair?return_url={quote(app_url, safe='')}"
+
+
+def _effective_pairing_code() -> str:
+    """Return the active pairing code from session/query/auth-bound storage."""
+    current = _normalize_pair_code(st.session_state.get("cloud_pairing_token", ""))
+    if _is_valid_pairing_code(current):
+        return current
+    auth_key = _auth_identity_key()
+    if auth_key:
+        saved = _normalize_pair_code(get_user_pairing(auth_key))
+        if _is_valid_pairing_code(saved):
+            st.session_state["cloud_pairing_token"] = saved
+            _sync_pair_code_to_query(saved)
+            return saved
+    return ""
+
+
+def _render_browser_auto_pair_probe():
+    """
+    Browser-side auto pair:
+    1) If URL has pair, cache it in localStorage.
+    2) If URL has no pair, restore cached pair immediately.
+    3) If still missing, try localhost /ping and inject addin_id_cloud.
+
+    This keeps pairing nearly zero-touch after first install.
+    """
+    components.html(
+        """
+<script>
+(async function() {
+  const storeKey = "draftai_pair_code_v1";
+  const probeKey = "draftai_pair_probe_ts_v1";
+  const now = Date.now();
+
+  const u = new URL(window.top.location.href);
+  const qp = (u.searchParams.get("pair") || "").trim();
+  if (qp) {
+    try { localStorage.setItem(storeKey, qp); } catch (_) {}
+    return;
+  }
+
+  let cached = "";
+  try { cached = (localStorage.getItem(storeKey) || "").trim(); } catch (_) {}
+  if (cached) {
+    u.searchParams.set("pair", cached);
+    window.top.location.replace(u.toString());
+    return;
+  }
+
+  let lastProbe = 0;
+  try { lastProbe = Number(localStorage.getItem(probeKey) || "0"); } catch (_) {}
+  if (now - lastProbe < 15000) return;
+  try { localStorage.setItem(probeKey, String(now)); } catch (_) {}
+
+  try {
+    const resp = await fetch("http://localhost:7432/ping", { method: "GET" });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const pair = String(data.addin_id_cloud || "").trim();
+    if (!pair) return;
+    try { localStorage.setItem(storeKey, pair); } catch (_) {}
+    const next = new URL(window.top.location.href);
+    next.searchParams.set("pair", pair);
+    window.top.location.replace(next.toString());
+  } catch (_) {
+    // Add-in not reachable from this browser right now; keep manual fallback.
+  }
+})();
+</script>
+""",
+        height=0,
+    )
+
+
+def _render_pairing_controls(key_prefix: str) -> str:
+    """
+    Render machine pairing UX.
+    - Auto uses saved/discovered pairing when available.
+    - Manual pairing stays available as fallback only.
+    Returns the effective pairing code.
+    """
+    pair_code = _effective_pairing_code()
+
+    if pair_code:
+        short = f"{pair_code[:26]}..." if len(pair_code) > 29 else pair_code
+        st.markdown(
+            f"""
+<div style="background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.22);
+border-radius:9px;padding:8px 12px;margin:6px 0 10px;
+font-family:DM Mono,monospace;font-size:10px;color:#86efac;letter-spacing:0.03em;">
+✓ Machine paired automatically · <span style="color:#bbf7d0;">{short}</span>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        with st.expander("Switch machine (optional)", expanded=False):
+            manual = st.text_input(
+                "Pairing Code",
+                value=pair_code,
+                key=f"{key_prefix}_pairing_code",
+                help="Use this only if you want to route to a different SolidWorks machine.",
+                placeholder="Paste addin_id_cloud from /ping",
+            )
+            st.session_state["cloud_pairing_token"] = manual.strip()
+            _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
+            auth_key = _auth_identity_key()
+            if auth_key and _is_valid_pairing_code(st.session_state["cloud_pairing_token"]):
+                set_user_pairing(auth_key, st.session_state["cloud_pairing_token"])
+            st.caption("Need a new machine? Open `http://localhost:7432/ping` and copy `addin_id_cloud`.")
+            st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
+        return _effective_pairing_code()
+
+    st.markdown(
+        """
+<div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.25);
+border-radius:9px;padding:9px 12px;margin:6px 0 10px;
+font-family:DM Mono,monospace;font-size:10px;color:#f97316;letter-spacing:0.03em;">
+No paired machine found yet. Draft AI is trying to auto-detect your local add-in.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    manual = st.text_input(
+        "Pairing Code",
+        value="",
+        key=f"{key_prefix}_pairing_code",
+        help="Fallback only: paste addin_id_cloud if auto-detect is blocked by browser/network policy.",
+        placeholder="Paste addin_id_cloud from /ping (fallback)",
+    )
+    st.session_state["cloud_pairing_token"] = manual.strip()
+    _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
+    auth_key = _auth_identity_key()
+    if auth_key and _is_valid_pairing_code(st.session_state["cloud_pairing_token"]):
+        set_user_pairing(auth_key, st.session_state["cloud_pairing_token"])
+    st.caption("Fallback: open `http://localhost:7432/ping` and paste `addin_id_cloud` exactly.")
+    st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
+    return _effective_pairing_code()
 
 # ------------------------------------------------------------------
 # PASSWORD PROTECTION - SELECTIVE (ONLY FOR 3D → 2D FEATURE)
@@ -1581,6 +1719,10 @@ with st.sidebar:
     render_navigation_panel("sidebar")
     render_auth_panel()
 
+# Silent auto-pair probe for signed-in users.
+if _is_authenticated():
+    _render_browser_auto_pair_probe()
+
 
 # ------------------------------------------------------------------
 # TOP NAV � App title with spinning gear + white/orange color split
@@ -2395,18 +2537,7 @@ elif st.session_state.active_tab == "standards":
                     unsafe_allow_html=True,
                 )
 
-            pair_default = st.session_state.get("cloud_pairing_token", "")
-            pair_input = st.text_input(
-                "Pairing Code",
-                value=pair_default,
-                key="std_pairing_code",
-                help="Required for cloud relay to route jobs to one exact add-in instance.",
-                placeholder="Paste addin_id_cloud from /ping",
-            )
-            st.session_state["cloud_pairing_token"] = pair_input.strip()
-            _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
-            st.caption("Open `http://localhost:7432/ping` on your SolidWorks PC and paste `addin_id_cloud` exactly.")
-            st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
+            pairing_code = _render_pairing_controls("std")
 
             fc1, fc2 = st.columns([3, 1])
             with fc1:
@@ -2427,7 +2558,7 @@ elif st.session_state.active_tab == "standards":
                 )
 
             if run_3d:
-                pairing = st.session_state.get("cloud_pairing_token", "").strip()
+                pairing = pairing_code or _effective_pairing_code()
                 can_try = addin_ok or bool(pairing)
                 if not can_try:
                     st.error(
@@ -2799,18 +2930,7 @@ elif st.session_state.active_tab == "cad3d":
     addin_ok    = addin_local or addin_cloud
     st.session_state.addin_ok_cache = addin_ok
 
-    pair_default = st.session_state.get("cloud_pairing_token", "")
-    pair_input = st.text_input(
-        "Pairing Code",
-        value=pair_default,
-        key="cad_pairing_code",
-        help="Required for cloud relay to route jobs to one exact add-in instance.",
-        placeholder="Paste addin_id_cloud from /ping",
-    )
-    st.session_state["cloud_pairing_token"] = pair_input.strip()
-    _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
-    st.caption("Open `http://localhost:7432/ping` on your SolidWorks PC and paste `addin_id_cloud` exactly.")
-    st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
+    pairing_code = _render_pairing_controls("cad")
 
     if addin_local:
         st.markdown(
@@ -2897,7 +3017,7 @@ elif st.session_state.active_tab == "cad3d":
             use_container_width=True,
             key="cad_gen_btn",
         ):
-            pairing = st.session_state.get("cloud_pairing_token", "").strip()
+            pairing = pairing_code or _effective_pairing_code()
             can_try = addin_ok or bool(pairing)
             if not can_try:
                 st.warning(
