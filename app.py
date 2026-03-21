@@ -45,7 +45,6 @@ import hashlib
 import hmac
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 
 
 def _normalize_pair_code(value):
@@ -87,9 +86,10 @@ def _sync_pair_code_to_query(pair_code: str):
 
 
 def _auto_connect_link() -> str:
-    app_url = os.getenv("PUBLIC_APP_URL", "https://draftaii.streamlit.app").strip()
-    app_url = app_url.rstrip("/")
-    return f"http://localhost:7432/pair?return_url={quote(app_url, safe='')}"
+    app_url = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if app_url:
+        return f"{app_url}/?autopair=1"
+    return "?autopair=1"
 
 
 def _effective_pairing_code() -> str:
@@ -125,15 +125,22 @@ def _render_browser_auto_pair_probe():
   const now = Date.now();
 
   const u = new URL(window.top.location.href);
+  const force = ["1", "true", "yes"].includes(
+    String(u.searchParams.get("autopair") || "").trim().toLowerCase()
+  );
   const qp = (u.searchParams.get("pair") || "").trim();
   if (qp) {
     try { localStorage.setItem(storeKey, qp); } catch (_) {}
+    if (force) {
+      u.searchParams.delete("autopair");
+      window.top.history.replaceState({}, "", u.toString());
+    }
     return;
   }
 
   let cached = "";
   try { cached = (localStorage.getItem(storeKey) || "").trim(); } catch (_) {}
-  if (cached) {
+  if (cached && !force) {
     u.searchParams.set("pair", cached);
     window.top.location.replace(u.toString());
     return;
@@ -141,7 +148,7 @@ def _render_browser_auto_pair_probe():
 
   let lastProbe = 0;
   try { lastProbe = Number(localStorage.getItem(probeKey) || "0"); } catch (_) {}
-  if (now - lastProbe < 15000) return;
+  if (!force && now - lastProbe < 15000) return;
   try { localStorage.setItem(probeKey, String(now)); } catch (_) {}
 
   try {
@@ -152,10 +159,22 @@ def _render_browser_auto_pair_probe():
     if (!pair) return;
     try { localStorage.setItem(storeKey, pair); } catch (_) {}
     const next = new URL(window.top.location.href);
+    next.searchParams.delete("autopair");
     next.searchParams.set("pair", pair);
     window.top.location.replace(next.toString());
   } catch (_) {
-    // Add-in not reachable from this browser right now; keep manual fallback.
+    if (force && cached) {
+      const next = new URL(window.top.location.href);
+      next.searchParams.delete("autopair");
+      next.searchParams.set("pair", cached);
+      window.top.location.replace(next.toString());
+      return;
+    }
+    if (force) {
+      const clean = new URL(window.top.location.href);
+      clean.searchParams.delete("autopair");
+      window.top.history.replaceState({}, "", clean.toString());
+    }
   }
 })();
 </script>
