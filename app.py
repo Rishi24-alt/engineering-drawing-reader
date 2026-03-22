@@ -206,7 +206,7 @@ font-family:DM Mono,monospace;font-size:10px;color:#86efac;letter-spacing:0.03em
         )
         with st.expander("Switch machine (optional)", expanded=False):
             manual = st.text_input(
-                "Pairing Code",
+                "Routing Code",
                 value=pair_code,
                 key=f"{key_prefix}_pairing_code",
                 help="Use this only if you want to route to a different SolidWorks machine.",
@@ -226,25 +226,26 @@ font-family:DM Mono,monospace;font-size:10px;color:#86efac;letter-spacing:0.03em
 <div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.25);
 border-radius:9px;padding:9px 12px;margin:6px 0 10px;
 font-family:DM Mono,monospace;font-size:10px;color:#f97316;letter-spacing:0.03em;">
-No paired machine found yet. Draft AI is trying to auto-detect your local add-in.
+No paired machine found yet. Draft AI is auto-routing using your signed-in account.
 </div>
 """,
         unsafe_allow_html=True,
     )
-    manual = st.text_input(
-        "Pairing Code",
-        value="",
-        key=f"{key_prefix}_pairing_code",
-        help="Fallback only: paste addin_id_cloud if auto-detect is blocked by browser/network policy.",
-        placeholder="Paste addin_id_cloud from /ping (fallback)",
-    )
-    st.session_state["cloud_pairing_token"] = manual.strip()
-    _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
-    auth_key = _auth_identity_key()
-    if auth_key and _is_valid_pairing_code(st.session_state["cloud_pairing_token"]):
-        set_user_pairing(auth_key, st.session_state["cloud_pairing_token"])
-    st.caption("Fallback: open `http://localhost:7432/ping` and paste `addin_id_cloud` exactly.")
     st.markdown(f"[⚡ Auto-connect this browser]({_auto_connect_link()})")
+    with st.expander("Manual pairing fallback (advanced)", expanded=False):
+        manual = st.text_input(
+            "Routing Code",
+            value="",
+            key=f"{key_prefix}_pairing_code",
+            help="Only use this if automatic routing fails.",
+            placeholder="Paste addin_id_cloud from /ping",
+        )
+        st.session_state["cloud_pairing_token"] = manual.strip()
+        _sync_pair_code_to_query(st.session_state["cloud_pairing_token"])
+        auth_key = _auth_identity_key()
+        if auth_key and _is_valid_pairing_code(st.session_state["cloud_pairing_token"]):
+            set_user_pairing(auth_key, st.session_state["cloud_pairing_token"])
+        st.caption("Open `http://localhost:7432/ping` and copy `addin_id_cloud` exactly.")
     return _effective_pairing_code()
 
 # ------------------------------------------------------------------
@@ -2577,12 +2578,12 @@ elif st.session_state.active_tab == "standards":
                 )
 
             if run_3d:
-                pairing = pairing_code or _effective_pairing_code()
-                can_try = addin_ok or bool(pairing)
-                if not can_try:
+                routing_token = pairing_code or _effective_pairing_code()
+                if not addin_ok and not routing_token:
                     st.error(
-                        "⚠️ Add-in not detected yet. Open SolidWorks with Draft AI add-in loaded "
-                        "or enter your Pairing Code, then click Analyze again."
+                        "⚠️ No paired SolidWorks machine found. "
+                        "Open SolidWorks with Draft AI add-in on YOUR PC, "
+                        "then use the Auto-connect link to pair your browser."
                     )
                 else:
                     with st.spinner("SolidWorks is opening and analyzing your file..."):
@@ -2591,7 +2592,7 @@ elif st.session_state.active_tab == "standards":
                             sw_result = prepare_and_export(
                                 unified_file.read(),
                                 unified_file.name,
-                                user_token=pairing,
+                                user_token=routing_token,
                             )
                             st.session_state["step_analysis_result"] = sw_result
                             st.session_state["standards_result"] = None  # force re-run
@@ -3036,12 +3037,12 @@ elif st.session_state.active_tab == "cad3d":
             use_container_width=True,
             key="cad_gen_btn",
         ):
-            pairing = pairing_code or _effective_pairing_code()
-            can_try = addin_ok or bool(pairing)
-            if not can_try:
+            routing_token = pairing_code or _effective_pairing_code()
+            if not addin_ok and not routing_token:
                 st.warning(
-                    "⚠️ Add-in not detected yet. Open SolidWorks with Draft AI add-in loaded "
-                    "or enter your Pairing Code, then click Analyze."
+                    "⚠️ No paired SolidWorks machine found. "
+                    "Open SolidWorks with Draft AI add-in on YOUR PC, "
+                    "then use the Auto-connect link above to pair your browser."
                 )
             else:
                 with st.spinner("SolidWorks is processing your file... this may take up to 60 seconds"):
@@ -3049,7 +3050,7 @@ elif st.session_state.active_tab == "cad3d":
                         result = prepare_and_export(
                             cad_file.read(),
                             cad_file.name,
-                            user_token=pairing,
+                            user_token=routing_token,
                         )
                         st.session_state["cad_result"] = result
                         st.rerun()
