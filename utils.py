@@ -363,6 +363,8 @@ def _call_vision_api(
     base64_image = base64.b64encode(image_file.read()).decode("utf-8")
     req = dict(
         model="gpt-4o",
+        temperature=0,
+        seed=42,
         messages=[
             {"role": "system", "content": system_prompt},
             {
@@ -403,6 +405,8 @@ def _call_vision_api_multi(
 
     req = dict(
         model="gpt-4o",
+        temperature=0,
+        seed=42,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": content}
@@ -431,7 +435,7 @@ def _call_vision_api_with_history(image_file, system_prompt, question, chat_hist
             {"type": "text", "text": question}
         ]
     })
-    req = dict(model="gpt-4o", messages=messages, max_tokens=max_tokens)
+    req = dict(model="gpt-4o", temperature=0, seed=42, messages=messages, max_tokens=max_tokens)
     response = _chat_completion(req)
     return _extract_message_text(response.choices[0].message)
 
@@ -597,6 +601,11 @@ def analyze_tolerance_stackup(image_file):
 
 MANUFACTURABILITY_PROMPT = f"""You are a manufacturing engineer who evaluates engineering drawings for ease and cost of manufacture.
 {FORMAT_RULES}
+CRITICAL SCORING RULES:
+- Base every score ONLY on what is explicitly visible or clearly absent in the drawing.
+- Do NOT guess or assume. If a feature is unclear, treat it conservatively (lower score).
+- Apply the rubric mechanically — the same drawing must always produce the same scores.
+
 Score the drawing across 6 categories (each out of the listed max) and respond in this exact structure:
 
 MANUFACTURABILITY SCORE: [total] / 100
@@ -796,6 +805,8 @@ def compare_revisions(image_file_a, image_file_b):
 
     req = dict(
         model="gpt-4o",
+        temperature=0,
+        seed=42,
         messages=[
             {"role": "system", "content": REVISION_COMPARISON_PROMPT},
             {
@@ -1512,6 +1523,13 @@ def generate_bom_pdf(bom_data):
 
 STANDARDS_CHECKER_PROMPT = f"""You are a certified drawing checker with expertise in ASME Y14.5, ISO GPS, BS 8888, and industrial drawing standards.
 {FORMAT_RULES}
+CRITICAL SCORING RULES — follow exactly, no exceptions:
+- Every score MUST be based solely on what is VISIBLY present or absent in the drawing image.
+- Do NOT guess, infer, assume, or hallucinate. If something is not clearly visible, mark it as NOT PRESENT.
+- Score each category by counting concrete, observable evidence: present items score up, missing or violated items score down.
+- Do NOT vary scores based on interpretation. Apply the rubric mechanically to what you can see.
+- If a field is unclear or unreadable, treat it as MISSING — do not give partial credit for unreadable content.
+
 Perform a comprehensive standards compliance check and return ONLY a valid JSON object — no explanation, no markdown, no backticks.
 
 Return exactly this structure:
@@ -1534,15 +1552,15 @@ Return exactly this structure:
   "summary": "One paragraph executive summary"
 }}
 
-Check ALL of the following categories:
-1. Title Block: part name, number, revision, scale, date, drawn by, material, tolerances
-2. Dimensioning: no duplicate dims, no missing dims, proper leader lines, dimension placement
-3. Tolerancing: general tolerance stated, functional tolerances present, values realistic
-4. GD&T Application: symbols correct per standard, datum references complete, FCF valid
-5. Views and Projections: sufficient views, correct projection angle, section callouts correct
-6. Annotations and Notes: surface finish symbols, thread callouts complete, weld symbols
-7. Line Types and Weights: visible, hidden, center, dimension, section lines correct
-8. Scale and Units: scale stated, consistent units throughout
+Check ALL of the following categories and score each based ONLY on what is visible:
+1. Title Block (max 100): part name, number, revision, scale, date, drawn by, material, tolerances — 1 point deducted per missing field
+2. Dimensioning (max 100): no duplicate dims, no missing dims, proper leader lines, dimension placement
+3. Tolerancing (max 100): general tolerance stated, functional tolerances present, values realistic
+4. GD&T Application (max 100): symbols correct per standard, datum references complete, FCF valid
+5. Views and Projections (max 100): sufficient views, correct projection angle, section callouts correct
+6. Annotations and Notes (max 100): surface finish symbols, thread callouts complete, weld symbols
+7. Line Types and Weights (max 100): visible, hidden, center, dimension, section lines correct
+8. Scale and Units (max 100): scale stated, consistent units throughout
 Return ONLY the JSON. Nothing else."""
 
 

@@ -1270,6 +1270,23 @@ html, body {
 }
 [data-testid="stSidebar"] > div:first-child {
     padding: 24px 14px 16px !important;
+    height: 100vh !important;
+}
+[data-testid="stSidebarUserContent"] {
+    height: 100% !important;
+}
+[data-testid="stSidebarUserContent"] > div {
+    min-height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+[data-testid="stSidebarUserContent"] .st-key-sidebar_auth_panel {
+    margin-top: auto !important;
+    padding-top: 12px !important;
+    background: linear-gradient(180deg, rgba(0,0,0,0), #000 18px, #000 100%) !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 3 !important;
 }
 
 /* Section labels */
@@ -1806,8 +1823,10 @@ if _auth_key:
 # ------------------------------------------------------------------
 
 with st.sidebar:
-    render_navigation_panel("sidebar")
-    render_auth_panel()
+    with st.container():
+        render_navigation_panel("sidebar")
+    with st.container(key="sidebar_auth_panel"):
+        render_auth_panel()
 
 # Silent auto-pair probe for signed-in users.
 if _is_authenticated():
