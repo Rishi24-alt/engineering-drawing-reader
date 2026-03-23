@@ -489,11 +489,16 @@ def _auth_identity_key() -> str:
 def _auth_display_name() -> str:
     if _streamlit_auth_available() and _is_authenticated():
         return (
-            _get_streamlit_user_field("email")
-            or _get_streamlit_user_field("name")
+            _get_streamlit_user_field("name")
+            or _get_streamlit_user_field("email").split("@")[0]
             or "Google User"
         )
     return st.session_state.get("auth_user", "")
+
+def _auth_picture() -> str:
+    if _streamlit_auth_available() and _is_authenticated():
+        return _get_streamlit_user_field("picture") or ""
+    return ""
 
 
 def _do_sign_in():
@@ -523,38 +528,43 @@ def _do_sign_out():
 
 
 def render_auth_panel():
-    """Render account card in sidebar."""
+    """Render account card pinned to sidebar bottom."""
+    st.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
     if _is_authenticated():
         who   = _auth_display_name() or "User"
+        pic   = _auth_picture()
         init  = who[0].upper()
-        short = who[:18] + ("…" if len(who) > 18 else "")
-        st.markdown(f'''
-<div class="sb-account">
-  <div class="sb-avatar">{init}</div>
-  <div class="sb-account-info">
-    <span class="sb-account-name">{short}</span>
-    <span class="sb-account-plan">Free Plan · {MAX_REQUESTS_PER_IP} req/hr</span>
-  </div>
-</div>
-''', unsafe_allow_html=True)
-        if st.button("Sign Out →", key="auth_signout", use_container_width=True):
+        first = who.split()[0] if who.split() else who
+        if pic:
+            avatar = '<img src="' + pic + '" class="sb-avatar-img" />'
+        else:
+            avatar = '<div class="sb-avatar-initials">' + init + '</div>'
+        card = (
+            '<div class="sb-account-card">'
+            '  <div class="sb-account-left">'
+            + avatar +
+            '    <div class="sb-account-info">'
+            '      <span class="sb-account-name">' + first + '</span>'
+            '      <span class="sb-account-plan">Free Plan &middot; ' + str(MAX_REQUESTS_PER_IP) + ' req/hr</span>'
+            '    </div>'
+            '  </div>'
+            '  <div class="sb-online-dot"></div>'
+            '</div>'
+        )
+        st.markdown(card, unsafe_allow_html=True)
+        if st.button("Sign Out", key="auth_signout", use_container_width=True):
             _do_sign_out()
         return True
-
-    # Not signed in
-    st.markdown('''
-<div style="background:rgba(249,115,22,0.05);border:1px solid rgba(249,115,22,0.15);
-            border-radius:8px;padding:10px 12px;margin-bottom:8px;
-            font-family:'DM Mono',monospace;font-size:10px;
-            color:rgba(255,255,255,0.3);line-height:1.7;">
-  Sign in to unlock Standards Checker &amp; 3D → 2D
-</div>
-''', unsafe_allow_html=True)
+    hint = (
+        '<div class="sb-signin-hint">'
+        'Sign in to unlock Standards Checker &amp; 3D&#x2192;2D'
+        '</div>'
+    )
+    st.markdown(hint, unsafe_allow_html=True)
     if st.button("Sign In with Google", key="auth_signin_google",
-                  use_container_width=True, type="primary"):
+                 use_container_width=True, type="primary"):
         _do_sign_in()
     return False
-
 
 def render_feature_auth_gate(feature_name: str, key_prefix: str):
     st.markdown(
@@ -769,83 +779,93 @@ def persist_chat():
 
 
 def render_navigation_panel(key_prefix="nav", include_saved_chats=True):
-    """Render navigation and chat controls in either the sidebar or a popover."""
-    st.markdown(
-        '<div class="sb-logo">Draft <span>AI</span></div>', unsafe_allow_html=True
-    )
-
-    st.markdown('<div class="sb-label">Navigation</div>', unsafe_allow_html=True)
-    is_signed_in = _is_authenticated()
+    is_signed_in   = _is_authenticated()
+    active         = st.session_state.get("active_tab", "analyze")
     protected_tabs = {"standards", "cad3d"}
+    count          = len(st.session_state.saved_chats)
+    _ip            = get_client_ip()
+    _, _rem, _     = check_rate_limit(_ip)
+
+    # Header
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
+        '<span style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;letter-spacing:-0.04em;color:#fff;">Draft' +
+        '<span style="color:#f97316;"> AI</span></span>' +
+        '<span style="font-family:DM Mono,monospace;font-size:8px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;background:rgba(249,115,22,0.12);color:#f97316;border:1px solid rgba(249,115,22,0.25);border-radius:100px;padding:2px 7px;">BETA</span>' +
+        '</div>' +
+        '<div style="font-family:DM Mono,monospace;font-size:9px;color:rgba(255,255,255,0.18);margin-bottom:14px;letter-spacing:0.04em;">Engineering Drawing Intelligence</div>' +
+        '<div class="sb-section-label">Menu</div>',
+        unsafe_allow_html=True)
+
+    # Nav items — plain st.button only, styled via CSS
     nav_items = [
-        ("Analyze Drawing", "analyze"),
-        ("Batch Analysis", "batch"),
-        ("Drawing Library", "library"),
-        ("BOM Generator", "bom"),
+        ("Analyze Drawing",   "analyze"),
+        ("Batch Analysis",    "batch"),
+        ("Drawing Library",   "library"),
+        ("BOM Generator",     "bom"),
         ("Standards Checker", "standards"),
-        ("3D → 2D", "cad3d"),
+        ("3D \u2192 2D",     "cad3d"),
     ]
+
+    # Inject active-state CSS for current tab button
+    active_style = (
+        '<style>' +
+        f'[data-testid="stSidebar"] button[data-testid="baseButton-secondary"][key*="_tab_{active}"],' +
+        f'[data-testid="stSidebar"] div[data-testid="element-container"]:has(button[key*="_tab_{active}"]) button' +
+        ' { background: rgba(249,115,22,0.12) !important; border-color: rgba(249,115,22,0.3) !important; color: #f97316 !important; font-weight: 600 !important; }' +
+        '</style>'
+    )
+    st.markdown(active_style, unsafe_allow_html=True)
+
     for label, tab in nav_items:
-        button_label = (
-            f"{label} · Sign In"
-            if (tab in protected_tabs and not is_signed_in)
-            else label
-        )
-        if st.button(button_label, key=f"{key_prefix}_{tab}", use_container_width=True):
+        is_locked = tab in protected_tabs and not is_signed_in
+        btn_label = label + (" \U0001f512" if is_locked else "")
+        if st.button(btn_label, key=f"{key_prefix}_tab_{tab}", use_container_width=True):
             st.session_state.active_tab = tab
             st.rerun()
 
-    st.markdown('<div class="sb-label">Chat History</div>', unsafe_allow_html=True)
-    count = len(st.session_state.saved_chats)
+    # Divider + stats
     st.markdown(
-        f'<div class="sb-quota"><span>{count}</span> / {MAX_CHATS} chats saved</div>',
-        unsafe_allow_html=True,
-    )
-    _ip = get_client_ip()
-    _, _rem, _ = check_rate_limit(_ip)
-    st.markdown(
-        f'<div class="sb-quota">Requests left: <span>{_rem}</span> / {MAX_REQUESTS_PER_IP} this hour</div>',
-        unsafe_allow_html=True,
-    )
+        '<div class="sb-divider"></div>' +
+        '<div class="sb-section-label">Recent Chats</div>' +
+        '<div style="display:flex;gap:6px;margin-bottom:8px;">' +
+        '<div style="flex:1;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 10px;display:flex;align-items:baseline;gap:4px;">' +
+        f'<span style="font-family:Syne,sans-serif;font-size:14px;font-weight:800;color:#f97316;">{count}</span>' +
+        f'<span style="font-family:DM Mono,monospace;font-size:8px;color:rgba(255,255,255,0.25);">/ {MAX_CHATS}</span></div>' +
+        '<div style="flex:1;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 10px;display:flex;align-items:baseline;gap:4px;">' +
+        f'<span style="font-family:Syne,sans-serif;font-size:14px;font-weight:800;color:#f97316;">{_rem}</span>' +
+        f'<span style="font-family:DM Mono,monospace;font-size:8px;color:rgba(255,255,255,0.25);">/ {MAX_REQUESTS_PER_IP}</span></div></div>',
+        unsafe_allow_html=True)
 
     if st.button("+ New Chat", key=f"{key_prefix}_new_chat", use_container_width=True):
-        st.session_state.chat_history = []
-        st.session_state.messages_display = []
-        st.session_state.current_drawing_name = None
-        st.session_state.title_block_data = None
+        st.session_state.chat_history      = []
+        st.session_state.messages_display  = []
+        st.session_state.current_drawing_name  = None
+        st.session_state.title_block_data  = None
         st.session_state.current_drawing_image = None
-        st.session_state.uploader_key += 1
+        st.session_state.uploader_key     += 1
         st.rerun()
 
     if not include_saved_chats:
         return
 
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     if not st.session_state.saved_chats:
-        st.markdown(
-            '<div style="font-size:11px;color:rgba(255,255,255,0.12);'
-            "font-family:'JetBrains Mono',monospace;padding:4px 0;\">No chats yet.</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div style="font-family:DM Mono,monospace;font-size:10px;color:rgba(255,255,255,0.14);padding:4px 0;">No saved chats yet</div>', unsafe_allow_html=True)
         return
 
     for name in reversed(list(st.session_state.saved_chats.keys())):
         cb, cd = st.columns([5, 1])
         with cb:
-            if st.button(
-                f"{name[:22]}",
-                key=f"{key_prefix}_load_{name}",
-                use_container_width=True,
-            ):
+            if st.button(name[:20], key=f"{key_prefix}_load_{name}", use_container_width=True):
                 s = st.session_state.saved_chats[name]
-                st.session_state.messages_display = s["messages_display"]
-                st.session_state.chat_history = s["chat_history"]
-                st.session_state.current_drawing_name = name
+                st.session_state.messages_display      = s["messages_display"]
+                st.session_state.chat_history          = s["chat_history"]
+                st.session_state.current_drawing_name  = name
                 st.session_state.current_drawing_image = s.get("image")
                 st.session_state.active_tab = "analyze"
                 st.rerun()
         with cd:
-            if st.button("X", key=f"{key_prefix}_del_{name}", use_container_width=True):
+            if st.button("x", key=f"{key_prefix}_del_{name}", use_container_width=True):
                 del st.session_state.saved_chats[name]
                 save_chats(st.session_state.saved_chats)
                 st.rerun()
@@ -1238,146 +1258,90 @@ html, body {
 
 /* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
-    background: #080808 !important;
-    border-right: 1px solid rgba(255,255,255,0.04) !important;
-    min-width: 260px !important;
-    max-width: 260px !important;
-    transform: translateX(0) !important;
-    margin-left: 0 !important;
-    visibility: visible !important;
+    background: #000000 !important;
+    border-right: 1px solid rgba(255,255,255,0.05) !important;
+    min-width: 256px !important; max-width: 256px !important;
+    transform: translateX(0) !important; visibility: visible !important;
+    overflow: hidden !important;
 }
 [data-testid="stSidebar"][aria-expanded="false"] {
-    min-width: 260px !important;
-    max-width: 260px !important;
-    transform: translateX(0) !important;
-    margin-left: 0 !important;
-    visibility: visible !important;
+    min-width: 256px !important; max-width: 256px !important;
+    transform: translateX(0) !important; visibility: visible !important;
 }
-[data-testid="stSidebar"] > div:first-child { padding: 20px 12px 20px !important; }
-
-/* Logo */
-.sb-logo {
-    font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800;
-    letter-spacing: -0.04em; color: #fff; line-height: 1;
-}
-.sb-logo span { color: #f97316; }
-.sb-badge {
-    display: inline-block; font-family: 'DM Mono', monospace; font-size: 8px;
-    letter-spacing: 0.12em; text-transform: uppercase;
-    background: rgba(249,115,22,0.12); color: #f97316;
-    border: 1px solid rgba(249,115,22,0.2); border-radius: 4px;
-    padding: 2px 6px; margin-left: 6px; vertical-align: middle;
-}
-.sb-tagline {
-    font-family: 'DM Mono', monospace; font-size: 9px;
-    color: rgba(255,255,255,0.2); letter-spacing: 0.08em;
-    margin-top: 4px; margin-bottom: 0;
+[data-testid="stSidebar"] > div:first-child {
+    padding: 24px 14px 16px !important;
 }
 
 /* Section labels */
-.sb-label {
-    font-family: 'DM Mono', monospace; font-size: 8.5px; letter-spacing: 0.16em;
-    text-transform: uppercase; color: rgba(255,255,255,0.15);
-    margin-bottom: 6px; margin-top: 22px; padding-left: 10px;
-    display: flex; align-items: center; gap: 6px;
+.sb-section-label {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 8px !important; letter-spacing: 0.2em !important;
+    text-transform: uppercase !important; color: rgba(255,255,255,0.2) !important;
+    margin-bottom: 5px !important; padding-left: 2px !important;
 }
-.sb-label::before {
-    content: ''; display: inline-block; width: 14px; height: 1px;
-    background: rgba(255,255,255,0.1);
-}
-
-/* Stats pills */
-.sb-stats {
-    display: flex; gap: 6px; margin-bottom: 16px; padding: 0 2px;
-}
-.sb-stat {
-    flex: 1; background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 8px; padding: 8px 6px; text-align: center;
-}
-.sb-stat-val {
-    font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800;
-    color: #f97316; line-height: 1; display: block;
-}
-.sb-stat-lbl {
-    font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: 0.08em;
-    text-transform: uppercase; color: rgba(255,255,255,0.2);
-    display: block; margin-top: 3px;
-}
-
-/* Nav icons map */
-.sb-nav-icon { margin-right: 8px; opacity: 0.6; font-size: 13px; }
 
 /* Divider */
 .sb-divider {
-    height: 1px; background: rgba(255,255,255,0.04);
-    margin: 16px 4px;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.07), transparent);
+    margin: 14px 0 10px;
 }
 
-/* Account card */
-.sb-account {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px; padding: 10px 12px;
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 8px;
-}
-.sb-avatar {
-    width: 28px; height: 28px; border-radius: 50%;
-    background: linear-gradient(135deg, #f97316, #ea580c);
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 800;
-    color: #fff; flex-shrink: 0;
-}
-.sb-account-info { overflow: hidden; }
-.sb-account-name {
-    font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600;
-    color: rgba(255,255,255,0.8); white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; display: block;
-}
-.sb-account-plan {
-    font-family: 'DM Mono', monospace; font-size: 9px;
-    color: rgba(255,255,255,0.25); letter-spacing: 0.06em;
-}
-
-/* Nav buttons */
+/* ALL sidebar buttons */
 [data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
     border: 1px solid transparent !important;
-    color: rgba(255,255,255,0.38) !important;
-    border-radius: 8px !important;
-    font-family: 'DM Mono', monospace !important;
-    font-size: 11px !important; font-weight: 400 !important;
-    letter-spacing: 0.02em !important;
-    padding: 9px 10px 9px 10px !important; width: 100% !important;
-    text-align: left !important; margin-bottom: 2px !important;
-    transition: all 0.12s ease !important;
-    height: auto !important; min-height: unset !important; max-height: unset !important;
+    color: rgba(255,255,255,0.45) !important;
+    border-radius: 7px !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 12.5px !important;
+    font-weight: 400 !important;
+    letter-spacing: -0.01em !important;
+    padding: 0 12px !important;
+    width: 100% !important;
+    height: 36px !important; min-height: 36px !important; max-height: 36px !important;
+    margin-bottom: 1px !important;
+    text-align: left !important;
     justify-content: flex-start !important;
+    transition: background 0.12s, border-color 0.12s, color 0.12s !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(249,115,22,0.06) !important;
-    border-color: rgba(249,115,22,0.15) !important;
-    color: rgba(255,255,255,0.75) !important;
-    padding-left: 13px !important;
+    background: rgba(255,255,255,0.05) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    color: rgba(255,255,255,0.85) !important;
 }
 
-/* Chat history items */
-.sb-chat-item {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 10px; border-radius: 7px;
-    border: 1px solid transparent;
-    transition: all 0.12s;
+/* New Chat button */
+[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    color: rgba(255,255,255,0.45) !important;
 }
-.sb-chat-item:hover {
-    background: rgba(255,255,255,0.03);
-    border-color: rgba(255,255,255,0.06);
+
+/* Sign In primary */
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: #f97316 !important;
+    border: none !important;
+    color: #000 !important;
+    font-weight: 700 !important;
+    justify-content: center !important;
+    box-shadow: 0 0 20px rgba(249,115,22,0.2) !important;
 }
-.sb-no-chats {
-    font-family: 'DM Mono', monospace; font-size: 10px;
-    color: rgba(255,255,255,0.1); padding: 6px 10px;
-    text-align: center; letter-spacing: 0.06em;
+[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+    background: #fb923c !important;
 }
+
+/* Account card */
+.sb-account-card { display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.sb-account-left { display: flex; align-items: center; gap: 10px; overflow: hidden; min-width: 0; }
+.sb-avatar-img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1.5px solid rgba(249,115,22,0.45); }
+.sb-avatar-initials { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #f97316, #ea580c); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 800; color: #fff; flex-shrink: 0; }
+.sb-account-info { overflow: hidden; min-width: 0; }
+.sb-account-name { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.sb-account-plan { font-family: 'DM Mono', monospace; font-size: 9px; color: rgba(255,255,255,0.28); display: block; margin-top: 1px; }
+.sb-online-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; flex-shrink: 0; box-shadow: 0 0 6px rgba(34,197,94,0.5); animation: dotPulse 2.5s ease-in-out infinite; }
+@keyframes dotPulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+.sb-signin-hint { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(255,255,255,0.3); line-height: 1.6; }
 
 /* ── GEAR SPIN ── */
 @keyframes spinGear { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
