@@ -3767,4 +3767,4 @@ else:
                     {"role": "assistant", "content": answer}
                 )
                 persist_chat()
-                st.rerun()
+               
