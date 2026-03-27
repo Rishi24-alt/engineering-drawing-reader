@@ -2813,7 +2813,7 @@ elif st.session_state.active_tab == "standards":
                 if allowed:
                     with st.spinner("Running standards check across all views..."):
                         try:
-                            from utils import check_drawing_standards_multiview, gemini_model
+                            from utils import check_drawing_standards_multiview
                             import io as _io
 
                             views_bytes = {}

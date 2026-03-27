@@ -1579,15 +1579,12 @@ def check_drawing_standards(image_file):
 def check_drawing_standards_multiview(views_dict: dict):
     """
     Standards compliance check using OpenAI GPT-4o vision.
-    Sends front + top views for comprehensive analysis.
+    Uses the front view as primary; falls back to any available view.
     """
-    import json
-    import re
-
     # Use front view — most informative for standards checking
     front_png = views_dict.get("front")
     if not front_png:
-        # Try any available view
+        # Fall back to any available view
         for vkey in ["top", "side", "isometric"]:
             front_png = views_dict.get(vkey)
             if front_png:
