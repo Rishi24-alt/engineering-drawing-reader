@@ -1,1 +1,5 @@
 poppler-utils
+libpoppler-cpp-dev
+libjpeg-dev
+zlib1g-dev
+libfreetype6-dev
