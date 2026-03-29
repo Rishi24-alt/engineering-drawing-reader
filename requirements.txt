@@ -1,9 +1,9 @@
 streamlit==1.41.1
 python-dotenv==1.0.1
 openai==1.59.9
-pillow==11.2.0
 numpy==1.26.4
 opencv-python==4.10.0.84
+Pillow==10.1.0
 pdf2image==1.17.0
 reportlab==4.2.5
 openpyxl==3.11.0
@@ -19,7 +19,6 @@ watchdog==6.0.0
 svglib==1.5.1
 scipy==1.14.1
 scikit-image==0.24.0
-Pillow==11.2.0
 lxml==6.0.2
 tinycss2==1.5.1
 cssselect2==0.9.0
@@ -27,5 +26,5 @@ urllib3==2.6.3
 certifi==2024.12.14
 charset-normalizer==3.4.0
 idna==3.10
-grpcio>=1.0.0
+grpcio>=1.33.2
 protobuf>=3.20.0
