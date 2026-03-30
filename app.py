@@ -46,6 +46,14 @@ import hmac
 from datetime import datetime
 from pathlib import Path
 
+# PAGE CONFIG — must be first Streamlit command
+st.set_page_config(
+    page_title="Draft AI",
+    page_icon=":pencil:",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 
 def _normalize_pair_code(value):
     if value is None:
@@ -1062,17 +1070,6 @@ def render_drawing_preview(image_bytes, key_suffix):
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
         if st.button("Enlarge", key=f"enlarge_{key_suffix}", use_container_width=True):
             open_drawing_preview(image_bytes)
-
-
-# PAGE CONFIG
-# ------------------------------------------------------------------
-
-st.set_page_config(
-    page_title="Draft AI",
-    page_icon=":pencil:",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 
 # ------------------------------------------------------------------
