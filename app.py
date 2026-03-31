@@ -42,6 +42,7 @@ import io
 import re
 import time
 import base64
+import shutil
 import hashlib
 import hmac
 from datetime import datetime
@@ -50,6 +51,9 @@ from pathlib import Path
 FALLBACK_FAVICON_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAElElEQVR42qWXTWhcVRTHf++9eTNJJhOnX+mkSWsSYz8SFWsjSRcSpRRLC2JBFwU/VioYRdyIddNFQUTspiAVUaiC0IUUReOm1KBtqYHSmEpMbKyxJmGSNEnzPZnMvHddnPs6M8lkMp25q2Hefef+3//8z/+cayilFPkspcAw1n7uOmCYufdkWb6cB07+C6EtEChPBZ4bh6Ee6LsAiSXY/gQ0HYRwtX7PFSBFAXCTYFpw5Qu48DlU7wDTB0tzMDsGM1OwnLb/gQpoewOeOwH+4H2BMLKmwAswG4XjdbAYBwMwkYNNoASw/UK948ACsHMvtJ+HjbV5g8i+wzAlcEUVtB4DZUIwAJYJR9rh6HEIRWBe02AYELbhVjd8cgBmovKfcgtkwBOVacLAJfi4DRRQvxc+uC7PZ0fhy5eg5yIELdlv2TCXgMeegnc79SeaCH33wwCIBgDq90PNbqG4fr98VSIGFRF46wfYuQ9iGqyTgJANv1+CztMSw3ULSEE6C5YNTYcl9xVbJT2WLUK1S+G1c1BWDo5OhetAmQkdJ2F+QoDlqPR1VKKpazwIFpmiMn0CYksDPH8CFrXolAu2CRN34epZiaGcAgF4B+5ohgogNrM6TcqFp9+G2gaIaxCuAtuArq91NViFAjAABeWbobIGpkdWM6Rc8AXg0PuQ0G6pHPADw70Q/TNnRaxfqJ6IqppgYjAzNfdYUNB8DKprYFlbsmlBzIVbV1LeUhAAtIAiu2Hin8wKuceCA/4yaH0V4mmpU8BQdxFVkL4218H0OCxMpnrFSq20vAxBn1QCiHA90Gu4Yv4AQhGYB0b7V1PqqX/rLnioBeJaCyYwf6dYADrfgXJIAoNdmalJ7x8Ajx+VfYYhry4vprGlimDANGX3wC9pFZKlZBufFSNykikzy9ET8hdhYklKa/AqxKaltrPpILIHIg2QcIUBy9b9oFgRxqZFVJN3YOBXAbbS4bw5oq4VEvo/f1CnUWVtSvkDmB2TGAq4dk4HW6PL1bVqQEBwk/6timRg8rYcHjDhRoeMZqa5Ir8aUPWjki4H2LidFJpCAHi5Hb8pu302TM3Cb1+lrDjDupGJyOuQkcZijEgJgEQMxvplgnSTEDDg59MQX9AeoDIBlG+Csg0S/cF9q+07bwBe4NG/YCoKPt3v/SaMDMPFU7r7JTMPsUukQYWDMjUXbETKFRb+vgQxleoBrgtlFvz4EUR7pdS8uveAOMuw6xkoCek7g1HoPGBAb4femeZoloJ4DD57UfqD5ZNDnSQkl2FhCtreLHAqTh/NZ6Jw8zIEyJzvXBdKLPivD04dgJE/wPILkBvfQ+XD0HRI4phWITcjDaD7PEwvQMiXluu0mbHMhNs98OGT0PwCVO6By2fg9W+1JtwCr2beGNV1FgK+LF+hRKQeEySg8xtYBN45I2bkOjm/PsfVTL/Y8x1cvya3oHgy1Rq8W5KtIyQdiAGhcmj/FFpe0bbsK+JqBvDTSRiPwrZaKA0LqKU5uDssc8FoH0wNQekGeOQIHH5PjCePL1//ZrRG88hY8QWI9kO4CsLbMtnLc/0PaEu2gKPGTkQAAAAASUVORK5CYII="
 )
+
+APP_DIR = Path(__file__).resolve().parent
+APP_FAVICON = APP_DIR / "favicon.png"
 
 
 def _normalize_pair_code(value):
@@ -109,6 +113,22 @@ def _inject_browser_branding():
         height=0,
         width=0,
     )
+
+
+def _ensure_streamlit_static_favicon():
+    if not APP_FAVICON.exists():
+        return
+    try:
+        streamlit_static_favicon = Path(st.__file__).resolve().parent / "static" / "favicon.png"
+        if streamlit_static_favicon.exists():
+            try:
+                same_file = streamlit_static_favicon.read_bytes() == APP_FAVICON.read_bytes()
+            except Exception:
+                same_file = False
+            if not same_file:
+                shutil.copyfile(APP_FAVICON, streamlit_static_favicon)
+    except Exception:
+        pass
 
 
 def _sync_pair_code_to_query(pair_code: str):
@@ -1105,10 +1125,6 @@ def render_drawing_preview(image_bytes, key_suffix):
 # PAGE CONFIG
 # ------------------------------------------------------------------
 
-APP_DIR = Path(__file__).resolve().parent
-APP_FAVICON = APP_DIR / "favicon.png"
-
-
 def _load_favicon_image():
     if APP_FAVICON.exists():
         try:
@@ -1126,6 +1142,7 @@ def _load_favicon_image():
 
 
 APP_FAVICON_IMAGE = _load_favicon_image()
+_ensure_streamlit_static_favicon()
 
 st.set_page_config(
     page_title="Draft AI",
