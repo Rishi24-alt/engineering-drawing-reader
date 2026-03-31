@@ -2121,7 +2121,7 @@ border-radius:8px;padding:12px 14px;text-align:center;">
         "batchq",
         placeholder="Ask anything about the drawing...",
         label_visibility="collapsed",
-        height=52,
+        height=68,
         key="batch_chat_input",
     )
     bq_col1, bq_col2 = st.columns([5, 1], gap="small")
@@ -2394,7 +2394,7 @@ elif st.session_state.active_tab == "bom":
         "bomq",
         placeholder="Ask anything about the drawing...",
         label_visibility="collapsed",
-        height=52,
+        height=68,
         key="bom_chat_input",
     )
     bomq_col1, bomq_col2 = st.columns([5, 1], gap="small")
@@ -3539,7 +3539,7 @@ else:
         "msg",
         placeholder="Ask anything about the drawing...",
         label_visibility="collapsed",
-        height=52,
+        height=68,
     )
     col_ask, col_clear, col_pdf = st.columns([4, 1, 1], gap="small")
 
