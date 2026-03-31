@@ -206,11 +206,8 @@ def _cloud_poll(session_id: str, timeout: int = 120) -> dict:
 
 
 def _get_dedicated_addin(user_session: str) -> str:
-    """
-    Get a dedicated add-in instance for this user session.
-    Returns addin_id or None if no add-in available.
-    """
-    result = _cloud_post("/addin/connect", {"user_session": user_session})
+    """Get a dedicated add-in instance for this user session."""
+    result   = _cloud_post("/addin/connect", {"user_session": user_session})
     addin_id = result.get("addin_id")
     status   = result.get("status")
     if not addin_id or status == "no_addin_available":
@@ -250,6 +247,12 @@ def prepare_and_export_cloud(file_bytes: bytes, filename: str, user_token: str =
 
     result = _cloud_poll(session_id, timeout=120)
     if not result.get("success"):
+        # Clear cached addin id in Streamlit session if available.
+        try:
+            import streamlit as st
+            st.session_state.pop("my_addin_id", None)
+        except Exception:
+            pass
         raise RuntimeError(result.get("error", "Export failed"))
     result_addin_id = str(result.get("addin_id", "")).strip()
     if result_addin_id and result_addin_id != target_addin_id:
