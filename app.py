@@ -179,7 +179,7 @@ def _render_browser_auto_pair_probe():
 })();
 </script>
 """,
-        height=0,
+        height=68,
     )
 
 
