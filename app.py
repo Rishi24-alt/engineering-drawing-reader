@@ -526,6 +526,56 @@ def _streamlit_auth_available() -> bool:
     return all(hasattr(st, name) for name in ("login", "logout", "user"))
 
 
+def _secret_get(path, default=""):
+    cur = st.secrets
+    try:
+        for key in path:
+            if cur is None:
+                return default
+            if isinstance(cur, dict):
+                cur = cur.get(key)
+            else:
+                cur = cur[key]
+        if cur is None:
+            return default
+        return str(cur).strip()
+    except Exception:
+        return default
+
+
+def _guess_public_base_url() -> str:
+    try:
+        headers = st.context.headers
+    except Exception:
+        return ""
+    host = (
+        headers.get("x-forwarded-host")
+        or headers.get("x-original-host")
+        or headers.get("host")
+        or ""
+    ).strip()
+    if not host:
+        return ""
+    proto = (headers.get("x-forwarded-proto") or "https").strip().lower()
+    if proto not in {"http", "https"}:
+        proto = "https"
+    return f"{proto}://{host}"
+
+
+def _streamlit_google_configured():
+    required = {
+        "auth.redirect_uri": _secret_get(("auth", "redirect_uri")),
+        "auth.cookie_secret": _secret_get(("auth", "cookie_secret")),
+        "auth.google.client_id": _secret_get(("auth", "google", "client_id")),
+        "auth.google.client_secret": _secret_get(("auth", "google", "client_secret")),
+        "auth.google.server_metadata_url": _secret_get(
+            ("auth", "google", "server_metadata_url")
+        ),
+    }
+    missing = [k for k, v in required.items() if not v]
+    return len(missing) == 0, missing
+
+
 def _get_streamlit_user_field(field: str):
     try:
         user = st.user
@@ -585,16 +635,36 @@ def _auth_picture() -> str:
 
 
 def _do_sign_in():
-    if _streamlit_auth_available():
-        try:
-            # This app uses a named provider in secrets.toml: [auth.google]
-            # So we must call st.login("google"), not st.login().
-            st.login("google")
-            return
-        except Exception as e:
-            st.error(f"Google Sign-In is not configured yet: {e}")
-            return
-    st.error("Google Sign-In is not configured yet. Please set Streamlit OIDC.")
+    if not _streamlit_auth_available():
+        st.error("Google Sign-In is unavailable in this Streamlit runtime.")
+        return
+
+    configured, missing = _streamlit_google_configured()
+    if not configured:
+        base_url = _guess_public_base_url()
+        callback = f"{base_url}/oauth2callback" if base_url else "https://<your-domain>/oauth2callback"
+        st.error("Google Sign-In is not configured on this deployment.")
+        st.caption(
+            "Add the missing keys in deployed app secrets and ensure your Google OAuth redirect URI matches exactly."
+        )
+        st.code("\n".join(missing), language="text")
+        st.caption("Expected redirect URI for this deployment:")
+        st.code(callback, language="text")
+        return
+
+    try:
+        # This app uses a named provider in secrets.toml: [auth.google]
+        # So we must call st.login('google'), not st.login().
+        st.login("google")
+        return
+    except Exception:
+        base_url = _guess_public_base_url()
+        callback = f"{base_url}/oauth2callback" if base_url else "https://<your-domain>/oauth2callback"
+        st.error("Google Sign-In failed to start on this deployment.")
+        st.caption(
+            "Check deployed secrets and confirm this exact callback is allowed in Google Cloud OAuth client settings."
+        )
+        st.code(callback, language="text")
 
 
 def _do_sign_out():
