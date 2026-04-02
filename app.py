@@ -115,6 +115,31 @@ def _inject_browser_branding():
     )
 
 
+def _inject_corner_sidebar_toggle():
+    # Cleanup legacy custom overlay toggle from earlier builds.
+    components.html(
+        """
+        <script>
+        (() => {
+          const d = window.parent?.document;
+          if (!d) return;
+          const btn = d.getElementById("draftai-corner-toggle");
+          if (btn) btn.remove();
+          const st = d.getElementById("draftai-corner-toggle-style");
+          if (st) st.remove();
+          const w = window.parent;
+          if (w && w.__draftaiCornerToggleTimer) {
+            w.clearInterval(w.__draftaiCornerToggleTimer);
+            w.__draftaiCornerToggleTimer = null;
+          }
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def _ensure_streamlit_static_favicon():
     if not APP_FAVICON.exists():
         return
@@ -1152,6 +1177,7 @@ st.set_page_config(
 )
 
 _inject_browser_branding()
+_inject_corner_sidebar_toggle()
 
 
 # ------------------------------------------------------------------
@@ -1168,7 +1194,7 @@ st.markdown(
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body {
-    background: #0b0b0b !important;
+    background: #000000 !important;
     font-family: 'Syne', sans-serif;
     letter-spacing: -0.01em;
     overflow-x: hidden !important;
@@ -1176,13 +1202,13 @@ html, body {
     min-height: 100vh !important;
 }
 [data-testid="stAppViewContainer"] {
-    background: #0b0b0b !important;
+    background: linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%) !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
     min-height: 100vh !important;
 }
 [data-testid="stMain"] {
-    background: #0b0b0b !important;
+    background: transparent !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
     min-height: 100vh !important;
@@ -1206,14 +1232,21 @@ html, body {
     content: '';
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background:
-        radial-gradient(ellipse 70% 50% at 10% 5%,  rgba(249,115,22,0.05) 0%, transparent 60%),
-        radial-gradient(ellipse 50% 40% at 90% 90%,  rgba(249,115,22,0.03) 0%, transparent 60%);
+        radial-gradient(ellipse 46% 30% at 14% 0%, rgba(249,115,22,0.08) 0%, transparent 58%),
+        radial-gradient(ellipse 26% 20% at 82% 14%, rgba(249,115,22,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 34% 24% at 50% 100%, rgba(249,115,22,0.02) 0%, transparent 72%);
+    pointer-events: none; z-index: 0;
+}
+[data-testid="stAppViewContainer"]::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(circle at 50% 12%, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 30%);
     pointer-events: none; z-index: 0;
 }
 
 /* ── LAYOUT ── */
 :root {
-    --app-shell-max-width: min(1420px, calc(100vw - 312px));
+    --app-shell-max-width: min(1420px, 100%);
 }
 .block-container {
     width: min(100%, var(--app-shell-max-width)) !important;
@@ -1235,10 +1268,10 @@ html, body {
 /* ── FIXED TOP BAR ── */
 .top-bar {
     position: sticky; top: 0; z-index: 200;
-    background: rgba(11,11,11,0.92);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: none;
     padding: 12px 4px;
     margin-bottom: 10px;
     display: flex; align-items: center; justify-content: space-between;
@@ -1257,99 +1290,37 @@ html, body {
 }
 .top-bar-file {
     font-family: 'DM Mono', monospace; font-size: 11px;
-    color: rgba(255,255,255,0.35); background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07); border-radius: 6px;
-    padding: 4px 10px; max-width: 220px;
+    color: rgba(255,255,255,0.35); background: transparent;
+    border: none; border-radius: 0;
+    padding: 0; max-width: 220px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .top-bar-file .dot { color: #22c55e; margin-right: 5px; }
-
-/* ── SIDEBAR TOGGLE ── */
-[data-testid="collapsedControl"] {
-    display: none !important;
-}
-[data-testid="stSidebarCollapseButton"] { display: none !important; }
-
-
-/* ── SIDEBAR COLLAPSE ARROW ── */
-/* Hide the default text/icon and replace with clean arrow */
-[data-testid="stSidebarCollapsedControl"],
-[data-testid="collapsedControl"] {
-    background: #0d0d0d !important;
-    border: 1px solid rgba(249,115,22,0.25) !important;
-    border-radius: 0 8px 8px 0 !important;
-    width: 24px !important;
-    height: 48px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    position: fixed !important;
-    top: 50% !important;
-    left: 0 !important;
-    transform: translateY(-50%) !important;
-    z-index: 99999 !important;
-    cursor: pointer !important;
-    transition: all 0.2s !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover,
-[data-testid="collapsedControl"]:hover {
-    background: rgba(249,115,22,0.12) !important;
-    border-color: rgba(249,115,22,0.5) !important;
-    width: 28px !important;
-}
-[data-testid="stSidebarCollapsedControl"] svg,
-[data-testid="collapsedControl"] svg {
-    color: #f97316 !important;
-    fill: #f97316 !important;
-    width: 14px !important;
-    height: 14px !important;
-}
-
-/* The expand/collapse button inside the sidebar */
-[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"],
-[data-testid="stSidebar"] button[aria-label="close sidebar"],
-[data-testid="stSidebar"] button[aria-label="Close sidebar"],
-[data-testid="stSidebar"] button[kind="header"] {
-    background: transparent !important;
-    border: 1px solid rgba(249,115,22,0.2) !important;
-    border-radius: 0 8px 8px 0 !important;
-    color: #f97316 !important;
-    width: 24px !important;
-    height: 48px !important;
-    position: fixed !important;
-    left: 238px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    z-index: 99999 !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"]:hover,
-[data-testid="stSidebar"] button[aria-label="close sidebar"]:hover {
-    background: rgba(249,115,22,0.1) !important;
-    border-color: #f97316 !important;
-}
-[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"] svg,
-[data-testid="stSidebar"] button[aria-label="close sidebar"] svg {
-    color: #f97316 !important;
-    fill: #f97316 !important;
-}
 
 /* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
     background: #000000 !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
-    min-width: 256px !important; max-width: 256px !important;
-    transform: translateX(0) !important; visibility: visible !important;
-    overflow: hidden !important;
+    position: relative !important;
+    overflow: visible !important;
+    min-width: 320px !important;
+    max-width: 320px !important;
 }
 [data-testid="stSidebar"][aria-expanded="false"] {
-    min-width: 256px !important; max-width: 256px !important;
-    transform: translateX(0) !important; visibility: visible !important;
+    min-width: 320px !important;
+    max-width: 320px !important;
+    transform: none !important;
+    margin-left: 0 !important;
+}
+
+/* Desktop-only fixed sidebar: no collapse controls */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"],
+[data-testid="stSidebar"] button[aria-label="close sidebar"],
+[data-testid="stSidebar"] button[aria-label="Close sidebar"] {
+    display: none !important;
 }
 [data-testid="stSidebar"] > div:first-child {
     padding: 24px 14px 16px !important;
@@ -1707,8 +1678,8 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 [data-testid="stProgressBar"] > div > div { background: #f97316 !important; }
 
 /* ── FOOTER ── */
-.footer-txt { font-family: 'DM Mono', monospace; font-size: 9px; color: rgba(255,255,255,0.08); text-align: center; padding: 4px 0 2px; letter-spacing: 0.08em; text-transform: uppercase; }
-.footer-txt span { color: rgba(249,115,22,0.4); }
+.footer-txt { font-family: 'DM Mono', monospace; font-size: 9px; color: rgba(255,255,255,1); text-align: center; padding: 4px 0 2px; letter-spacing: 0.08em; text-transform: uppercase; }
+.footer-txt span { color: rgba(249,115,22,1); }
 
 /* ── AUTH PAGE ── */
 .auth-intro { margin: 28px 0 10px; }
@@ -1795,7 +1766,11 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 
 /* ── SPLASH ── */
 #draft-ai-splash {
-    position: fixed; inset: 0; background: #0b0b0b;
+    position: fixed; inset: 0;
+    background:
+        radial-gradient(ellipse 46% 30% at 14% 0%, rgba(249,115,22,0.09) 0%, transparent 58%),
+        radial-gradient(ellipse 26% 20% at 82% 14%, rgba(249,115,22,0.04) 0%, transparent 60%),
+        linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     z-index: 999999; animation: splashFade 0.5s ease 3.2s forwards;
     overflow: hidden;
@@ -1817,35 +1792,265 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 * { scrollbar-width: none !important; }
 
 
-/* FINAL READABILITY PASS */
-.top-bar-file,
+/* ── READABILITY: restore intentional hierarchy, never flatten it ── */
+
+/* Muted mono labels — keep them subtle */
+.section-label,
+.chat-section-header,
+.sb-section-label,
 .sb-sub,
 .sb-label,
 .sb-quota,
-.section-label,
-.chat-section-header,
-.chat-empty-title,
-.chat-empty-sub,
-.chip,
-div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div > button[key^="chip"],
-.stButton > button,
-[data-testid="stDownloadButton"] button,
-.stDownloadButton button,
-.stTextArea textarea::placeholder,
-.stTextInput label,
 .lib-meta,
 .footer-txt,
-[data-testid="stSpinner"] p,
-[data-testid="stCheckbox"] label,
-[data-testid="stFileUploaderDropzoneInstructions"],
 .upload-hint,
-.upload-hint span {
-    color: rgba(255,255,255,0.92) !important;
+[data-testid="stFileUploaderDropzoneInstructions"],
+[data-testid="stSpinner"] p {
     opacity: 1 !important;
 }
+
+/* Section divider lines */
 .section-label::after,
 .chat-section-header::after {
-    background: rgba(255,255,255,0.16) !important;
+    background: rgba(255,255,255,0.07) !important;
+}
+
+/* Buttons — readable but not blazing white */
+.stButton > button,
+[data-testid="stDownloadButton"] button,
+.stDownloadButton button {
+    color: rgba(255,255,255,0.7) !important;
+    opacity: 1 !important;
+}
+
+/* Chip buttons */
+div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div > button[key^="chip"] {
+    color: rgba(255,255,255,0.5) !important;
+    opacity: 1 !important;
+}
+
+/* Textarea placeholder — intentionally dim */
+.stTextArea textarea::placeholder {
+    color: rgba(255,255,255,0.22) !important;
+}
+
+/* Text input label */
+.stTextInput label {
+    color: rgba(255,255,255,0.35) !important;
+    opacity: 1 !important;
+}
+
+/* ── ENHANCED POLISH ── */
+
+/* Expander header */
+[data-testid="stExpander"] summary {
+    background: rgba(255,255,255,0.02) !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 8px !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 12px !important;
+    color: rgba(255,255,255,0.55) !important;
+    transition: background 0.15s, border-color 0.15s !important;
+}
+[data-testid="stExpander"] summary:hover {
+    background: rgba(249,115,22,0.04) !important;
+    border-color: rgba(249,115,22,0.2) !important;
+    color: rgba(255,255,255,0.8) !important;
+}
+[data-testid="stExpander"] summary svg {
+    color: rgba(249,115,22,0.6) !important;
+}
+[data-testid="stExpander"] > div[data-testid="stExpanderDetails"] {
+    background: rgba(255,255,255,0.015) !important;
+    border: 1px solid rgba(255,255,255,0.05) !important;
+    border-top: none !important;
+    border-radius: 0 0 8px 8px !important;
+}
+
+/* Select/dropdown */
+[data-testid="stSelectbox"] > div > div {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 8px !important;
+    color: rgba(255,255,255,0.8) !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 13px !important;
+    transition: border-color 0.15s !important;
+}
+[data-testid="stSelectbox"] > div > div:hover {
+    border-color: rgba(249,115,22,0.3) !important;
+}
+[data-testid="stSelectbox"] label {
+    color: rgba(255,255,255,0.35) !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+}
+
+/* Radio buttons */
+[data-testid="stRadio"] label {
+    color: rgba(255,255,255,0.6) !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 13px !important;
+}
+[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p {
+    color: rgba(255,255,255,0.35) !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+}
+
+/* Metric cards */
+[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.025) !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 10px !important;
+    padding: 14px 16px !important;
+    transition: border-color 0.15s !important;
+}
+[data-testid="stMetric"]:hover {
+    border-color: rgba(249,115,22,0.2) !important;
+}
+[data-testid="stMetricLabel"] {
+    color: rgba(255,255,255,0.35) !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+}
+[data-testid="stMetricValue"] {
+    color: #fff !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 24px !important;
+    font-weight: 800 !important;
+}
+[data-testid="stMetricDelta"] {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 11px !important;
+}
+
+/* Success / warning / error alerts */
+[data-testid="stAlert"][data-baseweb="notification"][kind="info"] {
+    background: rgba(59,130,246,0.05) !important;
+    border-color: rgba(59,130,246,0.18) !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="success"] {
+    background: rgba(34,197,94,0.05) !important;
+    border-color: rgba(34,197,94,0.18) !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="error"] {
+    background: rgba(239,68,68,0.05) !important;
+    border-color: rgba(239,68,68,0.2) !important;
+}
+[data-testid="stAlert"] p {
+    font-family: 'Syne', sans-serif !important;
+    font-size: 13px !important;
+    color: rgba(255,255,255,0.75) !important;
+    line-height: 1.6 !important;
+}
+
+/* Caption / helper text */
+[data-testid="stCaptionContainer"] p,
+.stCaption p {
+    color: rgba(255,255,255,0.28) !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.03em !important;
+}
+
+/* Markdown body text inside app */
+.stMarkdown p {
+    color: rgba(255,255,255,0.75) !important;
+    font-family: 'Syne', sans-serif !important;
+    font-size: 13px !important;
+    line-height: 1.7 !important;
+}
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    color: #fff !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.03em !important;
+}
+.stMarkdown code {
+    background: rgba(249,115,22,0.08) !important;
+    border: 1px solid rgba(249,115,22,0.15) !important;
+    border-radius: 4px !important;
+    color: #fb923c !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 12px !important;
+    padding: 1px 5px !important;
+}
+.stMarkdown a {
+    color: #f97316 !important;
+    text-decoration: none !important;
+    border-bottom: 1px solid rgba(249,115,22,0.3) !important;
+    transition: border-color 0.15s !important;
+}
+.stMarkdown a:hover {
+    border-bottom-color: #f97316 !important;
+}
+
+/* Divider st.divider() */
+[data-testid="stDivider"] hr {
+    border-color: rgba(255,255,255,0.06) !important;
+}
+
+/* Spinner ring color */
+[data-testid="stSpinner"] svg circle {
+    stroke: #f97316 !important;
+}
+
+/* Image caption */
+[data-testid="stImage"] figcaption {
+    color: rgba(255,255,255,0.25) !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 10px !important;
+}
+
+/* Column gaps feel tighter and cleaner */
+[data-testid="stHorizontalBlock"] {
+    gap: 10px !important;
+}
+
+/* Modal / dialog */
+[data-testid="stDialog"] > div {
+    background: #111 !important;
+    border: 1px solid rgba(249,115,22,0.2) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(249,115,22,0.08) !important;
+}
+
+/* Tooltip */
+[data-testid="stTooltipContent"] {
+    background: #1a1a1a !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 7px !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 11px !important;
+    color: rgba(255,255,255,0.7) !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important;
+}
+
+/* Top-bar GPT vision badge */
+.top-bar-right {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.08em;
+}
+
+/* Chat empty state — stay at intended opacity */
+.chat-empty-title { color: rgba(255,255,255,0.35) !important; }
+.chat-empty-sub   { color: rgba(255,255,255,0.2)  !important; }
+.chat-empty-icon  { opacity: 0.45 !important; }
+
+/* Chip inline buttons — keep their hover working */
+.chip:hover {
+    border-color: rgba(249,115,22,0.35) !important;
+    color: #f97316 !important;
+    background: rgba(249,115,22,0.07) !important;
 }
 
 </style>
