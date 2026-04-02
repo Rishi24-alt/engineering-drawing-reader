@@ -117,12 +117,16 @@ def _inject_browser_branding():
 
 def _inject_corner_sidebar_toggle():
     # Cleanup legacy custom overlay toggle from earlier builds.
+    # Also strip the inline padding-top Streamlit injects on .block-container
+    # which CSS !important cannot override.
     components.html(
         """
         <script>
         (() => {
           const d = window.parent?.document;
           if (!d) return;
+
+          // Remove legacy corner toggle
           const btn = d.getElementById("draftai-corner-toggle");
           if (btn) btn.remove();
           const st = d.getElementById("draftai-corner-toggle-style");
@@ -131,6 +135,38 @@ def _inject_corner_sidebar_toggle():
           if (w && w.__draftaiCornerToggleTimer) {
             w.clearInterval(w.__draftaiCornerToggleTimer);
             w.__draftaiCornerToggleTimer = null;
+          }
+
+          // Strip inline padding-top / margin-top that Streamlit injects at runtime
+          function stripTopPadding() {
+            // Main block container
+            const mbc = d.querySelector('[data-testid="stMainBlockContainer"]');
+            if (mbc) {
+              mbc.style.setProperty('padding-top', '0px', 'important');
+              mbc.style.setProperty('margin-top', '0px', 'important');
+            }
+            // block-container (the inner div Streamlit styles inline)
+            const bc = d.querySelector('.block-container');
+            if (bc) {
+              bc.style.setProperty('padding-top', '0px', 'important');
+              bc.style.setProperty('margin-top', '0px', 'important');
+            }
+            // stHeader — force out of flow
+            const hdr = d.querySelector('[data-testid="stHeader"]');
+            if (hdr) {
+              hdr.style.setProperty('display', 'none', 'important');
+              hdr.style.setProperty('height', '0', 'important');
+              hdr.style.setProperty('padding', '0', 'important');
+              hdr.style.setProperty('margin', '0', 'important');
+            }
+          }
+
+          // Run immediately and watch for Streamlit re-renders
+          stripTopPadding();
+          if (w && !w.__draftaiPaddingObserver) {
+            const obs = new MutationObserver(stripTopPadding);
+            obs.observe(d.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+            w.__draftaiPaddingObserver = obs;
           }
         })();
         </script>
@@ -1269,29 +1305,44 @@ html, body {
     letter-spacing: -0.01em;
     overflow-x: hidden !important;
     overflow-y: auto !important;
-    min-height: 100vh !important;
 }
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%) !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    min-height: 100vh !important;
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
 }
 [data-testid="stMain"] {
     background: transparent !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    min-height: 100vh !important;
-}
-[data-testid="stHeader"] {
-    background: transparent !important;
-    height: auto !important;
-    min-height: 0 !important;
     overflow: visible !important;
-    position: relative !important;
-    z-index: 100001 !important;
+    flex: 1 !important;
+    align-self: flex-start !important;
 }
-[data-testid="stHeader"] > div { overflow: visible !important; }
+/* Remove Streamlit's default extra top gutter that creates a large dead zone */
+[data-testid="stMainBlockContainer"] {
+    padding-top: 0px !important;
+    margin-top: 0px !important;
+}
+/* Collapse the header entirely so it takes zero space */
+[data-testid="stHeader"] {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    position: absolute !important;
+    pointer-events: none !important;
+}
+[data-testid="stHeader"] > div { display: none !important; }
+/* Compensate for any residual header space Streamlit injects via inline styles */
+[data-testid="stMain"] > div:first-child {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}
 
 /* Hide ALL scrollbars by default */
 ::-webkit-scrollbar { width: 0px !important; height: 0px !important; display: none !important; }
@@ -1323,7 +1374,7 @@ html, body {
     max-width: var(--app-shell-max-width) !important;
     margin: 0 auto !important;
     padding: 0 24px 170px 24px !important;
-    min-height: calc(100vh - 24px) !important;
+    min-height: unset !important;
     height: auto !important;
     max-height: unset !important;
     overflow: visible !important;
@@ -1372,9 +1423,14 @@ html, body {
     background: #000000 !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
     position: relative !important;
-    overflow: visible !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
     min-width: 320px !important;
     max-width: 320px !important;
+    align-self: flex-start !important;
+    height: 100vh !important;
+    position: sticky !important;
+    top: 0 !important;
 }
 [data-testid="stSidebar"][aria-expanded="false"] {
     min-width: 320px !important;
@@ -1393,11 +1449,14 @@ html, body {
     display: none !important;
 }
 [data-testid="stSidebar"] > div:first-child {
-    padding: 24px 14px 16px !important;
+    padding: 18px 14px 16px !important;
     height: 100vh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain !important;
 }
 [data-testid="stSidebarUserContent"] {
-    height: 100% !important;
+    min-height: 100% !important;
 }
 [data-testid="stSidebarUserContent"] > div {
     min-height: 100% !important;
@@ -1408,8 +1467,7 @@ html, body {
     margin-top: auto !important;
     padding-top: 12px !important;
     background: linear-gradient(180deg, rgba(0,0,0,0), #000 18px, #000 100%) !important;
-    position: sticky !important;
-    bottom: 0 !important;
+    position: static !important;
     z-index: 3 !important;
 }
 
@@ -2961,7 +3019,7 @@ elif st.session_state.active_tab == "standards":
     st.markdown(
         """
 <div style="background:linear-gradient(135deg,rgba(249,115,22,0.10) 0%,rgba(249,115,22,0.03) 100%);
-            border:1px solid rgba(249,115,22,0.22);border-radius:12px;padding:16px 20px;margin-bottom:14px;">
+            border:1px solid rgba(249,115,22,0.22);border-radius:12px;padding:6px 20px;margin-bottom:14px;">
     <div style="font-size:14px;font-weight:700;color:#fff;font-family:Syne,sans-serif;margin-bottom:6px;">
         Drawing Standards &amp; 3D Model Analysis
     </div>
@@ -3785,19 +3843,40 @@ else:
     if st.session_state.messages_display:
         st.markdown(
             """<style>
-[data-testid="stMain"] {
-    overflow-y: scroll !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
+html, body {
+    overflow-y: auto !important;
+    height: auto !important;
 }
-[data-testid="stMain"]::-webkit-scrollbar { display: none !important; width: 0 !important; }
+[data-testid="stMain"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: unset !important;
+}
 .block-container {
     height: auto !important;
     max-height: unset !important;
     overflow: visible !important;
     padding-bottom: 220px !important;
+}
+</style>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """<style>
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"] {
+    overflow-y: auto !important;
+    height: auto !important;
+    max-height: unset !important;
+}
+.block-container {
+    height: auto !important;
+    min-height: unset !important;
+    max-height: unset !important;
+    overflow: visible !important;
+    padding-bottom: 170px !important;
 }
 </style>""",
             unsafe_allow_html=True,
