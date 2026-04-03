@@ -1304,21 +1304,27 @@ html, body {
     font-family: 'Syne', sans-serif;
     letter-spacing: -0.01em;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: hidden !important;
 }
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%) !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     display: flex !important;
     flex-direction: row !important;
-    align-items: flex-start !important;
+    align-items: stretch !important;
     justify-content: flex-start !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
 }
 [data-testid="stMain"] {
     background: transparent !important;
-    overflow: visible !important;
     flex: 1 !important;
-    align-self: flex-start !important;
+    align-self: stretch !important;
+    min-height: 100vh !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
 }
 /* Remove Streamlit's default extra top gutter that creates a large dead zone */
 [data-testid="stMainBlockContainer"] {
@@ -1373,7 +1379,7 @@ html, body {
     width: min(100%, var(--app-shell-max-width)) !important;
     max-width: var(--app-shell-max-width) !important;
     margin: 0 auto !important;
-    padding: 0 24px 170px 24px !important;
+    padding: 0 24px 12px 24px !important;
     min-height: unset !important;
     height: auto !important;
     max-height: unset !important;
@@ -1388,13 +1394,13 @@ html, body {
 
 /* ── FIXED TOP BAR ── */
 .top-bar {
-    position: sticky; top: 0; z-index: 200;
+    position: sticky; top: 0; z-index: 20;
     background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-bottom: none;
-    padding: 12px 4px;
-    margin-bottom: 10px;
+    padding: 10px 0px 6px;
+    margin-bottom: 4px;
     display: flex; align-items: center; justify-content: space-between;
 }
 .top-bar-left  { display: flex; align-items: center; gap: 12px; }
@@ -1406,14 +1412,14 @@ html, body {
 .top-bar-badge {
     font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 600;
     background: rgba(249,115,22,0.12); border: 1px solid rgba(249,115,22,0.25);
-    color: #f97316; padding: 2px 8px; border-radius: 100px;
+    color: #f97316; padding: 0px 0px; border-radius: 100px;
     letter-spacing: 0.08em; text-transform: uppercase;
 }
 .top-bar-file {
     font-family: 'DM Mono', monospace; font-size: 11px;
     color: rgba(255,255,255,0.35); background: transparent;
     border: none; border-radius: 0;
-    padding: 0; max-width: 220px;
+    padding: 0; max-width: 260px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .top-bar-file .dot { color: #22c55e; margin-right: 5px; }
@@ -1422,15 +1428,15 @@ html, body {
 [data-testid="stSidebar"] {
     background: #000000 !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
-    position: relative !important;
+    position: sticky !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     min-width: 320px !important;
     max-width: 320px !important;
-    align-self: flex-start !important;
+    align-self: stretch !important;
     height: 100vh !important;
-    position: sticky !important;
     top: 0 !important;
+    flex-shrink: 0 !important;
 }
 [data-testid="stSidebar"][aria-expanded="false"] {
     min-width: 320px !important;
@@ -1449,7 +1455,7 @@ html, body {
     display: none !important;
 }
 [data-testid="stSidebar"] > div:first-child {
-    padding: 18px 14px 16px !important;
+    padding: 14px 14px 14px !important;
     height: 100vh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
@@ -1585,7 +1591,7 @@ html, body {
 .section-label {
     font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.16em;
     text-transform: uppercase; color: rgba(255,255,255,0.28);
-    margin-bottom: 6px; font-weight: 500;
+    margin-bottom: 4px; font-weight: 500;
     display: flex; align-items: center; gap: 8px;
 }
 .section-label::after {
@@ -1641,15 +1647,15 @@ html, body {
 /* ── CHAT AREA ── */
 .chat-section-header {
     display: flex; align-items: center; gap: 10px;
-    padding: 6px 0 4px;
+    padding: 4px 0 2px;
     font-family: 'DM Mono', monospace; font-size: 9px;
     color: rgba(255,255,255,0.2); letter-spacing: 0.14em; text-transform: uppercase;
     border-top: 1px solid rgba(255,255,255,0.05);
-    margin-top: 4px; margin-bottom: 6px;
+    margin-top: 2px; margin-bottom: 2px;
 }
 .chat-section-header::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.04); }
 
-.msg-row      { display: flex; margin-bottom: 16px; }
+.msg-row      { display: flex; margin-bottom: 10px; }
 .msg-row.user { justify-content: flex-end; }
 .msg-row.ai   { justify-content: flex-start; gap: 10px; align-items: flex-start; }
 
@@ -1678,7 +1684,7 @@ html, body {
 
 /* ── EMPTY STATE ── */
 .chat-empty {
-    text-align: center; padding: 16px 20px 8px;
+    text-align: center; padding: 4px 20px 2px;
 }
 .chat-empty-icon {
     font-size: 28px; margin-bottom: 8px; opacity: 0.6;
@@ -1694,7 +1700,7 @@ html, body {
 }
 .chat-empty-sub {
     font-family: 'DM Mono', monospace; font-size: 11px;
-    color: rgba(255,255,255,0.2); letter-spacing: 0.04em; margin-bottom: 28px;
+    color: rgba(255,255,255,0.2); letter-spacing: 0.04em; margin-bottom: 10px;
 }
 .suggestion-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 .chip {
@@ -1740,7 +1746,7 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
     .block-container {
         width: 100% !important;
         max-width: 100% !important;
-        padding: 0 16px 170px 16px !important;
+        padding: 0 16px 12px 16px !important;
     }
     .sticky-inner {
         width: 100%;
@@ -3699,24 +3705,28 @@ else:
         f"""
 <style>
 .section-label {{
-    margin: 8px 0 4px !important;
+    margin: 4px 0 2px !important;
 }}
 .chat-section-header {{
-    margin-top: 8px !important;
-    margin-bottom: 4px !important;
+    margin-top: 4px !important;
+    margin-bottom: 2px !important;
 }}
 .chat-empty {{
-    padding: 12px 20px 4px !important;
+    padding: 2px 20px 0px !important;
+}}
+.chat-empty-icon {{
+    font-size: 22px !important;
+    margin-bottom: 4px !important;
 }}
 .chat-empty-sub {{
-    margin-bottom: 16px !important;
+    margin-bottom: 6px !important;
 }}
 .sticky-wrap {{
     position: static !important;
     left: auto !important;
     right: auto !important;
     bottom: auto !important;
-    margin-top: 10px !important;
+    margin-top: 6px !important;
     pointer-events: auto !important;
 }}
 .sticky-inner {{
@@ -3725,7 +3735,7 @@ else:
     padding: 0 !important;
 }}
 .block-container {{
-    padding-bottom: {24 if has_analyze_results else 12}px !important;
+    padding-bottom: {190 if has_analyze_results else 12}px !important;
 }}
 </style>
 """,
