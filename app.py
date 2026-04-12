@@ -11,7 +11,6 @@ from utils import (
     analyze_drawing,
     generate_pdf,
     extract_title_block,
-    analyze_gdt,
     analyze_design_concerns,
     analyze_material,
     analyze_manufacturing,
@@ -46,6 +45,29 @@ import shutil
 import hashlib
 import hmac
 from datetime import datetime
+import html as html_mod
+import logging
+
+logger = logging.getLogger('draftai.app')
+
+# C-04: Cross-platform file locking for JSON stores
+import sys as _sys
+if _sys.platform == 'win32':
+    import msvcrt
+    def _lock_file(f):
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+    def _unlock_file(f):
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except Exception:
+            pass
+else:
+    import fcntl
+    def _lock_file(f):
+        fcntl.flock(f, fcntl.LOCK_EX)
+    def _unlock_file(f):
+        fcntl.flock(f, fcntl.LOCK_UN)
 from pathlib import Path
 
 FALLBACK_FAVICON_B64 = (
@@ -807,20 +829,29 @@ def check_file_size(f):
 
 
 def load_rate_limits():
-    """Load rate limit records from disk."""
-    if os.path.exists(RATE_LIMIT_FILE):
-        try:
-            with open(RATE_LIMIT_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    """Load rate limit records from disk with file locking."""
+    if not os.path.exists(RATE_LIMIT_FILE):
+        return {}
+    try:
+        with open(RATE_LIMIT_FILE, "r") as f:
+            _lock_file(f)
+            try:
+                data = json.load(f)
+            finally:
+                _unlock_file(f)
+            return data
+    except Exception:
+        return {}
 
 
 def save_rate_limits(d):
-    """Persist rate limit records to disk."""
+    """Persist rate limit records to disk with file locking."""
     with open(RATE_LIMIT_FILE, "w") as f:
-        json.dump(d, f)
+        _lock_file(f)
+        try:
+            json.dump(d, f)
+        finally:
+            _unlock_file(f)
 
 
 def get_client_ip():
@@ -840,6 +871,11 @@ def check_rate_limit(ip):
     """
     lim = load_rate_limits()
     now = time.time()
+    # M-04: Prune stale records older than 48 hours
+    stale_cutoff = now - 48 * 3600
+    stale_keys = [k for k, v in lim.items() if v.get("window_start", 0) < stale_cutoff]
+    for k in stale_keys:
+        del lim[k]
     if ip not in lim:
         lim[ip] = {"count": 0, "window_start": now}
     e = lim[ip]
@@ -847,6 +883,7 @@ def check_rate_limit(ip):
         e["count"] = 0
         e["window_start"] = now
     if e["count"] >= MAX_REQUESTS_PER_IP:
+        logger.warning("Rate limit hit: IP=%s count=%d limit=%d", ip[:16], e["count"], MAX_REQUESTS_PER_IP)
         save_rate_limits(lim)
         mins_left = max(1, int((3600 - (now - e["window_start"])) / 60))
         return False, 0, mins_left
@@ -869,20 +906,29 @@ def increment_rate_limit(ip):
 
 
 def load_library():
-    """Load drawing library metadata from disk."""
-    if os.path.exists(LIBRARY_FILE):
-        try:
-            with open(LIBRARY_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    """Load drawing library metadata from disk with file locking."""
+    if not os.path.exists(LIBRARY_FILE):
+        return {}
+    try:
+        with open(LIBRARY_FILE, "r") as f:
+            _lock_file(f)
+            try:
+                data = json.load(f)
+            finally:
+                _unlock_file(f)
+            return data
+    except Exception:
+        return {}
 
 
 def save_library(lib):
-    """Persist drawing library metadata to disk."""
+    """Persist drawing library metadata to disk with file locking."""
     with open(LIBRARY_FILE, "w") as f:
-        json.dump(lib, f)
+        _lock_file(f)
+        try:
+            json.dump(lib, f)
+        finally:
+            _unlock_file(f)
 
 
 def add_to_library(uploaded_file, tags="", notes=""):
@@ -894,8 +940,12 @@ def add_to_library(uploaded_file, tags="", notes=""):
     lib = load_library()
     name = uploaded_file.name
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name = os.path.basename(name).replace("..", "_")  # H-02: sanitize filename
     uid = f"{ts}_{name}"
     dest = os.path.join(LIBRARY_DIR, uid)
+    # H-02: Validate resolved path stays within LIBRARY_DIR
+    if not str(Path(dest).resolve()).startswith(str(Path(LIBRARY_DIR).resolve())):
+        raise ValueError("Invalid filename")
 
     uploaded_file.seek(0)
     with open(dest, "wb") as f:
@@ -933,20 +983,29 @@ def delete_from_library(uid):
 
 
 def load_chats():
-    """Load saved chat sessions from disk."""
-    if os.path.exists(CHATS_FILE):
-        try:
-            with open(CHATS_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    """Load saved chat sessions from disk with file locking."""
+    if not os.path.exists(CHATS_FILE):
+        return {}
+    try:
+        with open(CHATS_FILE, "r") as f:
+            _lock_file(f)
+            try:
+                data = json.load(f)
+            finally:
+                _unlock_file(f)
+            return data
+    except Exception:
+        return {}
 
 
 def save_chats(chats):
-    """Persist chat sessions to disk."""
+    """Persist chat sessions to disk with file locking."""
     with open(CHATS_FILE, "w") as f:
-        json.dump(chats, f)
+        _lock_file(f)
+        try:
+            json.dump(chats, f)
+        finally:
+            _unlock_file(f)
 
 
 def persist_chat():
@@ -960,7 +1019,7 @@ def persist_chat():
     st.session_state.saved_chats[name] = {
         "messages_display": list(st.session_state.messages_display),
         "chat_history": list(st.session_state.chat_history),
-        "image": st.session_state.get("current_drawing_image"),
+        # M-02: image data not persisted to reduce file size,
     }
     if len(st.session_state.saved_chats) > MAX_CHATS:
         del st.session_state.saved_chats[next(iter(st.session_state.saved_chats))]
@@ -1071,7 +1130,7 @@ def fmt(text):
     Handles: headings, ordered lists, unordered lists, bold, plain paragraphs.
     Escapes HTML special characters to prevent injection.
     """
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = html_mod.escape(text)  # L-01: Full HTML entity escaping
     lines = text.split("\n")
     html = ""
     in_list = False
@@ -1142,12 +1201,12 @@ def render_dim_table(json_str):
         rows = ""
         for i, d in enumerate(dims):
             bg = "rgba(255,255,255,0.02)" if i % 2 == 0 else "rgba(255,255,255,0.04)"
-            label = str(d.get("label", "�"))
-            value = str(d.get("value", "�"))
-            unit = str(d.get("unit", "�"))
-            tol = str(d.get("tolerance", "�"))
-            location = str(d.get("location", "�"))
-            dtype = str(d.get("type", "�"))
+            label = html_mod.escape(str(d.get("label", "�")))
+            value = html_mod.escape(str(d.get("value", "�")))
+            unit = html_mod.escape(str(d.get("unit", "�")))
+            tol = html_mod.escape(str(d.get("tolerance", "�")))
+            location = html_mod.escape(str(d.get("location", "�")))
+            dtype = html_mod.escape(str(d.get("type", "�")))
             rows += f"""<tr style="background:{bg};">
                 <td style="padding:7px 12px;color:rgba(255,255,255,0.5);font-size:12px;">{label}</td>
                 <td style="padding:7px 12px;color:#f97316;font-weight:600;font-size:14px;">{value}</td>
@@ -1194,8 +1253,8 @@ def render_title_block(raw):
     for line in raw.strip().split("\n"):
         if ":" in line:
             parts = line.split(":", 1)
-            k = parts[0].strip()
-            v = parts[1].strip() if len(parts) > 1 else "�"
+            k = html_mod.escape(parts[0].strip())
+            v = html_mod.escape(parts[1].strip()) if len(parts) > 1 else "�"
             if v and v.lower() != "not specified":
                 rows += (
                     f"<tr>"

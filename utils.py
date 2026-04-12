@@ -1,31 +1,100 @@
 import base64
-import os
 import io
 import json
 import math
+import os
 import re
 import zipfile
+from pathlib import Path
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
+
+try:
+    import toml
+except ImportError:
+    toml = None
 
 try:
     import openai
 except ImportError:
     openai = None
 
-# ── Read secrets from Streamlit if available, else fall back to env ──
+
+# ── Read secrets from env first, then local secrets.toml if present ──
+_SECRETS_CACHE = None
+
+
+def _load_local_secrets() -> dict:
+    global _SECRETS_CACHE
+    if _SECRETS_CACHE is not None:
+        return _SECRETS_CACHE
+
+    if toml is None:
+        _SECRETS_CACHE = {}
+        return _SECRETS_CACHE
+
+    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+    if not secrets_path.exists():
+        _SECRETS_CACHE = {}
+        return _SECRETS_CACHE
+
+    try:
+        parsed = toml.load(secrets_path)
+        _SECRETS_CACHE = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        _SECRETS_CACHE = {}
+
+    return _SECRETS_CACHE
+
+
 def _get_secret(key: str, default: str = "") -> str:
-    """Read from os.getenv only — avoids triggering st.secrets before set_page_config."""
-    return os.getenv(key, default)
+    """
+    Read secrets without touching st.secrets during import.
+    Priority: environment variable -> local .streamlit/secrets.toml -> default.
+    """
+    env_value = os.getenv(key, "").strip()
+    if env_value:
+        return env_value
+
+    local_secrets = _load_local_secrets()
+    value = local_secrets.get(key, default)
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+# ── Pipeline import (Claude + Gemini confidence-based routing) ────────────────
+_PIPELINE_AVAILABLE = False
+_pipeline_vision_call = None
+_pipeline_vision_call_multi = None
+
+try:
+    from ai_pipeline import (  # noqa: E402
+        PipelineResult,
+        run_pipeline,
+        run_pipeline_json,
+    )
+    from ai_pipeline import (
+        pipeline_vision_call as _pipeline_vision_call,
+    )
+    from ai_pipeline import (
+        pipeline_vision_call_multi as _pipeline_vision_call_multi,
+    )
+
+    _PIPELINE_AVAILABLE = True
+except ImportError:
+    pass
 
 try:
     import google.generativeai as genai
+
     _genai_available = True
 except ImportError:
-    genai            = None
+    genai = None
     _genai_available = False
 
 _gemini_model_cache = None
+
 
 def _get_gemini():
     """Get Gemini model — initialized lazily on first call."""
@@ -33,7 +102,9 @@ def _get_gemini():
     if _gemini_model_cache is not None:
         return _gemini_model_cache
     if not _genai_available:
-        raise ValueError("google-generativeai package not installed. Add it to requirements.txt")
+        raise ValueError(
+            "google-generativeai package not installed. Add it to requirements.txt"
+        )
     key = _get_secret("GEMINI_API_KEY")
     if not key:
         raise ValueError("GEMINI_API_KEY not found. Add it to Streamlit secrets.")
@@ -41,8 +112,21 @@ def _get_gemini():
     _gemini_model_cache = genai.GenerativeModel("gemini-2.0-flash")
     return _gemini_model_cache
 
+
 # Keep gemini_model as a property for backwards compatibility
 gemini_model = None  # will be set on first use via _get_gemini()
+
+
+# ── Expose pipeline API keys to env so ai_pipeline can read them ──────────────
+def _sync_pipeline_keys():
+    """Copy Streamlit secrets → os.environ so ai_pipeline.py can read them."""
+    for key in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+        val = _get_secret(key, "")
+        if val and not os.environ.get(key):
+            os.environ[key] = val
+
+
+_sync_pipeline_keys()
 
 try:
     from dotenv import load_dotenv
@@ -50,17 +134,27 @@ except ImportError:
     load_dotenv = None
 
 try:
-    from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import (
+        HRFlowable,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
 except ImportError:
-    A4 = colors = ParagraphStyle = mm = SimpleDocTemplate = Paragraph = Spacer = HRFlowable = Table = TableStyle = TA_LEFT = TA_CENTER = None
+    A4 = colors = ParagraphStyle = mm = SimpleDocTemplate = Paragraph = Spacer = (
+        HRFlowable
+    ) = Table = TableStyle = TA_LEFT = TA_CENTER = None
 
 try:
     from pdf2image import convert_from_bytes
+
     PDF2IMAGE_AVAILABLE = True
 except ImportError:
     convert_from_bytes = None
@@ -77,7 +171,9 @@ def pdf_to_image_bytes(pdf_file, page=0, dpi=200):
     try:
         pdf_file.seek(0)
         pdf_bytes = pdf_file.read()
-        pages = convert_from_bytes(pdf_bytes, dpi=dpi, first_page=page+1, last_page=page+1)
+        pages = convert_from_bytes(
+            pdf_bytes, dpi=dpi, first_page=page + 1, last_page=page + 1
+        )
         if not pages:
             return False, "Could not extract any pages from the PDF."
         buf = io.BytesIO()
@@ -87,33 +183,83 @@ def pdf_to_image_bytes(pdf_file, page=0, dpi=200):
     except Exception as e:
         return False, str(e)
 
+
+# ── Pipeline keys (read once at import) ──────────────────────────────────────
+ANTHROPIC_API_KEY = _get_secret("ANTHROPIC_API_KEY", "").strip()
+GEMINI_API_KEY = _get_secret("GEMINI_API_KEY", "").strip()
+
 DEFAULT_PROXY_URL = "https://web-production-a87eb.up.railway.app"
-OPENAI_API_KEY = _get_secret("OPENAI_API_KEY", "").replace("\n", "").replace("\r", "").strip()
+OPENAI_API_KEY = (
+    _get_secret("OPENAI_API_KEY", "").replace("\n", "").replace("\r", "").strip()
+)
 PROXY_URL = _get_secret("PROXY_URL", "").strip().rstrip("/")
 
-# Backward compatibility:
-# If no direct key is configured, use the legacy hosted proxy.
-if not PROXY_URL and not OPENAI_API_KEY:
-    PROXY_URL = DEFAULT_PROXY_URL
 
-if openai:
-    _direct_client = openai.OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-    if PROXY_URL:
-        client = openai.OpenAI(
+def _pipeline_enabled() -> bool:
+    """
+    Enable the Claude+Gemini pipeline only when both optional keys are present.
+    If either key is blank, DraftAI falls back cleanly to the OpenAI path.
+    """
+    return bool(
+        _PIPELINE_AVAILABLE
+        and callable(_pipeline_vision_call)
+        and ANTHROPIC_API_KEY
+        and GEMINI_API_KEY
+    )
+
+
+def _pipeline_multi_enabled() -> bool:
+    return bool(
+        _PIPELINE_AVAILABLE
+        and callable(_pipeline_vision_call_multi)
+        and ANTHROPIC_API_KEY
+        and GEMINI_API_KEY
+    )
+
+# L-02: Lazy OpenAI client initialization — deferred to first use
+_openai_client = None
+_openai_direct_client = None
+_openai_client_initialized = False
+
+
+def _init_openai_client():
+    """Initialize OpenAI client lazily on first use (L-02)."""
+    global _openai_client, _openai_direct_client, _openai_client_initialized
+    if _openai_client_initialized:
+        return
+    _openai_client_initialized = True
+
+    if not openai:
+        return
+
+    _effective_proxy = PROXY_URL
+    if not _effective_proxy and not OPENAI_API_KEY:
+        _effective_proxy = DEFAULT_PROXY_URL
+
+    if OPENAI_API_KEY:
+        _openai_direct_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    if _effective_proxy:
+        _openai_client = openai.OpenAI(
             api_key=OPENAI_API_KEY or "draft-ai-proxy",
-            base_url=PROXY_URL + "/v1",
+            base_url=_effective_proxy + "/v1",
         )
     elif OPENAI_API_KEY:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    else:
-        client = None
-else:
-    _direct_client = None
-    client = None
+        _openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+
+# Backward compatibility stub
+client = None
+
+
+def _get_client():
+    """Return the lazy-initialized OpenAI client."""
+    _init_openai_client()
+    return _openai_client
 
 
 def _require_openai():
-    if client is None:
+    _init_openai_client()
+    if _openai_client is None:
         raise RuntimeError(
             "OpenAI client is not configured. Set OPENAI_API_KEY (direct mode) "
             "or PROXY_URL (OpenAI-compatible proxy mode)."
@@ -122,7 +268,9 @@ def _require_openai():
 
 def _require_reportlab():
     if SimpleDocTemplate is None:
-        raise RuntimeError("PDF generation dependency is unavailable. Install 'reportlab' and redeploy.")
+        raise RuntimeError(
+            "PDF generation dependency is unavailable. Install 'reportlab' and redeploy."
+        )
 
 
 def _is_proxy_json_error(exc: Exception) -> bool:
@@ -139,11 +287,12 @@ def _is_proxy_json_error(exc: Exception) -> bool:
 def _chat_completion(req: dict):
     """Run chat completion with proxy->direct fallback when proxy returns bad JSON."""
     _require_openai()
+    c = _get_client()
     try:
-        return client.chat.completions.create(**req)
+        return c.chat.completions.create(**req)
     except Exception as exc:
-        if PROXY_URL and _direct_client is not None and _is_proxy_json_error(exc):
-            return _direct_client.chat.completions.create(**req)
+        if PROXY_URL and _openai_direct_client is not None and _is_proxy_json_error(exc):
+            return _openai_direct_client.chat.completions.create(**req)
         raise
 
 
@@ -200,6 +349,9 @@ def _clean_model_json(raw_text: str) -> str:
     return clean
 
 
+
+
+
 def _parse_json_response(raw_text: str, context: str):
     """Parse model JSON output with actionable errors."""
     clean = _clean_model_json(raw_text)
@@ -233,7 +385,9 @@ def _read_file_bytes(file_obj, context: str) -> bytes:
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
     if not isinstance(raw, (bytes, bytearray)):
-        raise ValueError(f"{context}: expected bytes from file upload, got {type(raw).__name__}.")
+        raise ValueError(
+            f"{context}: expected bytes from file upload, got {type(raw).__name__}."
+        )
 
     data = bytes(raw)
     if not data:
@@ -279,7 +433,9 @@ def _image_data_url_from_bytes(image_bytes: bytes, file_name: str = "") -> str:
     return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}"
 
 
-def _coerce_bounded_int(value, *, default: int = 0, minimum: int = 0, maximum: int = 100) -> int:
+def _coerce_bounded_int(
+    value, *, default: int = 0, minimum: int = 0, maximum: int = 100
+) -> int:
     """Coerce numeric-like values into a safe bounded integer."""
     try:
         if isinstance(value, bool):
@@ -340,7 +496,9 @@ def _sanitize_batch_analysis_result(payload: dict, filename: str = "drawing") ->
         "part_number": _coerce_text(data.get("part_number")),
         "drawing_type": _coerce_text(data.get("drawing_type"), "Unknown"),
         "status": _coerce_text(data.get("status"), "Analysis Failed"),
-        "manufacturability_score": _coerce_bounded_int(data.get("manufacturability_score"), default=0),
+        "manufacturability_score": _coerce_bounded_int(
+            data.get("manufacturability_score"), default=0
+        ),
         "estimated_cost_usd": _coerce_text(data.get("estimated_cost_usd")),
         "complexity": _coerce_text(data.get("complexity")),
         "critical_issues": _coerce_string_list(data.get("critical_issues")),
@@ -350,7 +508,9 @@ def _sanitize_batch_analysis_result(payload: dict, filename: str = "drawing") ->
         "material_specified": _coerce_bool(data.get("material_specified")),
         "tolerance_risk": _coerce_text(data.get("tolerance_risk")),
         "recommended_process": _coerce_text(data.get("recommended_process")),
-        "summary": _coerce_text(data.get("summary"), "Analysis could not be completed for this drawing."),
+        "summary": _coerce_text(
+            data.get("summary"), "Analysis could not be completed for this drawing."
+        ),
     }
 
 
@@ -362,7 +522,9 @@ def _sanitize_standards_result(payload: dict) -> dict:
         verdict = "FAIL"
 
     checks = []
-    for raw_check in data.get("checks", []) if isinstance(data.get("checks"), list) else []:
+    for raw_check in (
+        data.get("checks", []) if isinstance(data.get("checks"), list) else []
+    ):
         if not isinstance(raw_check, dict):
             continue
         status = _coerce_text(raw_check.get("status"), "FAIL").upper()
@@ -431,11 +593,15 @@ def _build_basic_xlsx(sheets: list[tuple[str, list[list]]]) -> io.BytesIO:
                     continue
                 cell_ref = f"{_excel_column_name(col_index)}{row_index}"
                 if isinstance(value, bool):
-                    cell_xml.append(f'<c r="{cell_ref}" t="b"><v>{1 if value else 0}</v></c>')
+                    cell_xml.append(
+                        f'<c r="{cell_ref}" t="b"><v>{1 if value else 0}</v></c>'
+                    )
                 elif isinstance(value, (int, float)) and not isinstance(value, bool):
                     cell_xml.append(f'<c r="{cell_ref}"><v>{value}</v></c>')
                 else:
-                    text = xml_escape(str(value)).replace("\r\n", "\n").replace("\r", "\n")
+                    text = (
+                        xml_escape(str(value)).replace("\r\n", "\n").replace("\r", "\n")
+                    )
                     cell_xml.append(
                         f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
                     )
@@ -444,8 +610,8 @@ def _build_basic_xlsx(sheets: list[tuple[str, list[list]]]) -> io.BytesIO:
         worksheet_xml_by_path[f"xl/worksheets/sheet{sheet_index}.xml"] = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            f'<sheetData>{"".join(row_xml)}</sheetData>'
-            '</worksheet>'
+            f"<sheetData>{''.join(row_xml)}</sheetData>"
+            "</worksheet>"
         )
 
     created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -461,7 +627,7 @@ def _build_basic_xlsx(sheets: list[tuple[str, list[list]]]) -> io.BytesIO:
             'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
             '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
             '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
-            f'{"".join(content_overrides)}'
+            f"{''.join(content_overrides)}"
             "</Types>",
         )
         workbook.writestr(
@@ -481,8 +647,8 @@ def _build_basic_xlsx(sheets: list[tuple[str, list[list]]]) -> io.BytesIO:
             'xmlns:dcterms="http://purl.org/dc/terms/" '
             'xmlns:dcmitype="http://purl.org/dc/dcmitype/" '
             'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-            '<dc:creator>Draft AI</dc:creator>'
-            '<cp:lastModifiedBy>Draft AI</cp:lastModifiedBy>'
+            "<dc:creator>Draft AI</dc:creator>"
+            "<cp:lastModifiedBy>Draft AI</cp:lastModifiedBy>"
             f'<dcterms:created xsi:type="dcterms:W3CDTF">{created}</dcterms:created>'
             f'<dcterms:modified xsi:type="dcterms:W3CDTF">{created}</dcterms:modified>'
             "</cp:coreProperties>",
@@ -492,29 +658,30 @@ def _build_basic_xlsx(sheets: list[tuple[str, list[list]]]) -> io.BytesIO:
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" '
             'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
-            '<Application>Draft AI</Application>'
-            '</Properties>',
+            "<Application>Draft AI</Application>"
+            "</Properties>",
         )
         workbook.writestr(
             "xl/workbook.xml",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            f'<sheets>{"".join(workbook_sheets)}</sheets>'
-            '</workbook>',
+            f"<sheets>{''.join(workbook_sheets)}</sheets>"
+            "</workbook>",
         )
         workbook.writestr(
             "xl/_rels/workbook.xml.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            f'{"".join(workbook_rels)}'
-            '</Relationships>',
+            f"{''.join(workbook_rels)}"
+            "</Relationships>",
         )
         for path, xml_payload in worksheet_xml_by_path.items():
             workbook.writestr(path, xml_payload)
 
     buffer.seek(0)
     return buffer
+
 
 # ── BASE FORMATTING RULES (shared by all prompts) ──
 FORMAT_RULES = """
@@ -655,7 +822,26 @@ ESTIMATED PRODUCTION NOTES:
 def _call_vision_api(
     image_file, system_prompt, user_message, max_tokens=1400, response_format=None
 ):
-    """Internal helper — single place where we call the API. No debug prints."""
+    """
+    Vision API router — uses Claude+Gemini confidence pipeline when available,
+    falls back to legacy OpenAI GPT-4o otherwise.
+    """
+    if _pipeline_enabled():
+        task_type = (
+            "json"
+            if (response_format and response_format.get("type") == "json_object")
+            else "general"
+        )
+        return _pipeline_vision_call(
+            image_file,
+            system_prompt,
+            user_message,
+            task_type=task_type,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+
+    # ── Legacy OpenAI GPT-4o fallback ────────────────────────────────────────
     image_bytes = _read_file_bytes(image_file, "Vision API image")
     data_url = _image_data_url_from_bytes(image_bytes, getattr(image_file, "name", ""))
     req = dict(
@@ -669,13 +855,13 @@ def _call_vision_api(
                 "content": [
                     {
                         "type": "image_url",
-                        "image_url": {"url": data_url, "detail": "high"}
+                        "image_url": {"url": data_url, "detail": "high"},
                     },
-                    {"type": "text", "text": user_message}
-                ]
-            }
+                    {"type": "text", "text": user_message},
+                ],
+            },
         ],
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
     )
     if response_format is not None:
         req["response_format"] = response_format
@@ -687,9 +873,24 @@ def _call_vision_api_multi(
     image_bytes_list, system_prompt, user_message, max_tokens=2200, response_format=None
 ):
     """
-    Send multiple images in a single API call.
+    Multi-image router — uses Claude+Gemini pipeline (stitched views) when available,
+    falls back to legacy OpenAI GPT-4o otherwise.
     image_bytes_list: list of (label, bytes) tuples e.g. [("front", b"..."), ("top", b"...")]
     """
+    if _pipeline_multi_enabled():
+        task_type = (
+            "json"
+            if (response_format and response_format.get("type") == "json_object")
+            else "general"
+        )
+        return _pipeline_vision_call_multi(
+            image_bytes_list,
+            system_prompt,
+            user_message,
+            task_type=task_type,
+        )
+
+    # ── Legacy OpenAI GPT-4o fallback ────────────────────────────────────────
     content = []
     for label, img_bytes in image_bytes_list:
         if not isinstance(img_bytes, (bytes, bytearray)):
@@ -697,13 +898,15 @@ def _call_vision_api_multi(
         if not img_bytes:
             raise ValueError(f"{label} view image is empty.")
         content.append({"type": "text", "text": f"[{label.upper()} VIEW]"})
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": _image_data_url_from_bytes(bytes(img_bytes), f"{label}.png"),
-                "detail": "high",
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _image_data_url_from_bytes(bytes(img_bytes), f"{label}.png"),
+                    "detail": "high",
+                },
             }
-        })
+        )
     content.append({"type": "text", "text": user_message})
 
     req = dict(
@@ -712,9 +915,9 @@ def _call_vision_api_multi(
         seed=42,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": content}
+            {"role": "user", "content": content},
         ],
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
     )
     if response_format is not None:
         req["response_format"] = response_format
@@ -722,29 +925,64 @@ def _call_vision_api_multi(
     return _extract_message_text(response.choices[0].message)
 
 
-def _call_vision_api_with_history(image_file, system_prompt, question, chat_history, max_tokens=1400):
-    """Vision API call with conversation history."""
+def _call_vision_api_with_history(
+    image_file, system_prompt, question, chat_history, max_tokens=1400
+):
+    """
+    Vision API call with conversation history.
+    Uses Claude+Gemini pipeline (history injected into system prompt) when available,
+    falls back to legacy OpenAI GPT-4o otherwise.
+    """
+    if _pipeline_enabled():
+        # Serialize history into the system prompt so the pipeline stays stateless
+        history_text = ""
+        if chat_history:
+            history_lines = []
+            for msg in chat_history:
+                role = msg.get("role", "user").upper()
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        part.get("text", "")
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    )
+                history_lines.append(f"{role}: {content}")
+            history_text = "\n\nCONVERSATION HISTORY:\n" + "\n".join(history_lines)
+
+        augmented_system = system_prompt + history_text
+        return _pipeline_vision_call(  # type: ignore[misc]
+            image_file,
+            augmented_system,
+            question,
+            task_type="general",
+            max_tokens=max_tokens,
+        )
+
+    # ── Legacy OpenAI GPT-4o fallback ────────────────────────────────────────
     image_bytes = _read_file_bytes(image_file, "Vision API image with history")
     data_url = _image_data_url_from_bytes(image_bytes, getattr(image_file, "name", ""))
     messages = [{"role": "system", "content": system_prompt}]
-    for msg in (chat_history or []):
+    for msg in chat_history or []:
         messages.append(msg)
-    messages.append({
-        "role": "user",
-        "content": [
-            {
-                "type": "image_url",
-                "image_url": {"url": data_url, "detail": "high"}
-            },
-            {"type": "text", "text": question}
-        ]
-    })
-    req = dict(model="gpt-4o", temperature=0, seed=42, messages=messages, max_tokens=max_tokens)
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
+                {"type": "text", "text": question},
+            ],
+        }
+    )
+    req = dict(
+        model="gpt-4o", temperature=0, seed=42, messages=messages, max_tokens=max_tokens
+    )
     response = _chat_completion(req)
     return _extract_message_text(response.choices[0].message)
 
 
 # ── PUBLIC FUNCTIONS ──
+
 
 def analyze_drawing(image_file, question, chat_history=None):
     """General Q&A analysis with chat history."""
@@ -762,7 +1000,7 @@ def analyze_gdt(image_file):
         image_file,
         GDT_PROMPT,
         "Perform a complete GD&T analysis of this engineering drawing. Identify every symbol, explain each one, and assess correctness.",
-        max_tokens=1600
+        max_tokens=1600,
     )
 
 
@@ -772,7 +1010,7 @@ def analyze_design_concerns(image_file):
         image_file,
         DESIGN_CONCERN_PROMPT,
         "Perform a thorough design review of this engineering drawing. Identify all concerns, issues, and violations.",
-        max_tokens=1600
+        max_tokens=1600,
     )
 
 
@@ -782,7 +1020,7 @@ def analyze_material(image_file):
         image_file,
         MATERIAL_PROMPT,
         "Analyze this engineering drawing and provide a complete material recommendation with alternatives and reasoning.",
-        max_tokens=1400
+        max_tokens=1400,
     )
 
 
@@ -792,7 +1030,7 @@ def analyze_manufacturing(image_file):
         image_file,
         MANUFACTURING_PROMPT,
         "Analyze this engineering drawing and recommend the best manufacturing methods, operation sequence, and production notes.",
-        max_tokens=1600
+        max_tokens=1600,
     )
 
 
@@ -823,9 +1061,8 @@ If tolerance is not specified, use the drawing's general tolerance or write "per
 If a value is unclear, use your best reading and add "(approx)" to the value.
 Return ONLY the JSON. Nothing else.""",
         "Extract every dimension from this engineering drawing and return structured JSON.",
-        max_tokens=1800
+        max_tokens=1800,
     )
-
 
 
 def extract_title_block(image_file):
@@ -852,9 +1089,8 @@ Units: [value or Not specified]
 
 Only include fields that are visible or can be inferred. Keep values short and factual.""",
         "Extract all title block information from this engineering drawing.",
-        max_tokens=600
+        max_tokens=600,
     )
-
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -900,7 +1136,7 @@ def analyze_tolerance_stackup(image_file):
         image_file,
         TOLERANCE_STACKUP_PROMPT,
         "Perform a complete tolerance stack-up analysis on this engineering drawing. Identify all dimensional chains, compute worst-case and RSS, and flag any at-risk fits.",
-        max_tokens=1800
+        max_tokens=1800,
     )
 
 
@@ -950,7 +1186,7 @@ def analyze_manufacturability_score(image_file):
         image_file,
         MANUFACTURABILITY_PROMPT,
         "Score the manufacturability of this engineering drawing from 0 to 100. Break down each category score and provide specific improvement suggestions.",
-        max_tokens=1600
+        max_tokens=1600,
     )
 
 
@@ -1005,7 +1241,7 @@ def estimate_cost(image_file):
         image_file,
         COST_ESTIMATION_PROMPT,
         "Estimate the manufacturing cost of this part. Break down material, machining, and finishing costs across low, medium, and high volumes.",
-        max_tokens=1800
+        max_tokens=1800,
     )
 
 
@@ -1057,7 +1293,7 @@ def detect_missing_dimensions(image_file):
         image_file,
         MISSING_DIMENSIONS_PROMPT,
         "Check this engineering drawing thoroughly for missing dimensions, tolerances, annotations, and views. List everything that is absent or ambiguous.",
-        max_tokens=1800
+        max_tokens=1800,
     )
 
 
@@ -1108,11 +1344,30 @@ RECOMMENDATION: APPROVE / NEEDS REVIEW / REJECT
 
 
 def compare_revisions(image_file_a, image_file_b):
-    """Compare two drawing revisions side-by-side and list all changes."""
+    """
+    Compare two drawing revisions side-by-side and list all changes.
+    Uses Claude+Gemini pipeline (views stitched vertically) when available,
+    falls back to legacy OpenAI GPT-4o otherwise.
+    """
     img_a = _read_file_bytes(image_file_a, "Revision A image")
     img_b = _read_file_bytes(image_file_b, "Revision B image")
-    data_url_a = _image_data_url_from_bytes(img_a, getattr(image_file_a, "name", "rev_a"))
-    data_url_b = _image_data_url_from_bytes(img_b, getattr(image_file_b, "name", "rev_b"))
+
+    if _pipeline_multi_enabled():
+        # Pass both images as a labelled multi-view call
+        return _pipeline_vision_call_multi(
+            [("REVISION A (older)", img_a), ("REVISION B (newer)", img_b)],
+            REVISION_COMPARISON_PROMPT,
+            "Compare these two drawing revisions carefully and report every change you find.",
+            task_type="general",
+        )
+
+    # ── Legacy OpenAI GPT-4o fallback ────────────────────────────────────────
+    data_url_a = _image_data_url_from_bytes(
+        img_a, getattr(image_file_a, "name", "rev_a")
+    )
+    data_url_b = _image_data_url_from_bytes(
+        img_b, getattr(image_file_b, "name", "rev_b")
+    )
 
     req = dict(
         model="gpt-4o",
@@ -1123,19 +1378,27 @@ def compare_revisions(image_file_a, image_file_b):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text",      "text": "REVISION A — the older drawing:"},
-                    {"type": "image_url", "image_url": {"url": data_url_a, "detail": "high"}},
-                    {"type": "text",      "text": "REVISION B — the newer drawing:"},
-                    {"type": "image_url", "image_url": {"url": data_url_b, "detail": "high"}},
-                    {"type": "text",      "text": "Compare these two drawing revisions carefully and report every change you find."},
+                    {"type": "text", "text": "REVISION A — the older drawing:"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url_a, "detail": "high"},
+                    },
+                    {"type": "text", "text": "REVISION B — the newer drawing:"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url_b, "detail": "high"},
+                    },
+                    {
+                        "type": "text",
+                        "text": "Compare these two drawing revisions carefully and report every change you find.",
+                    },
                 ],
-            }
+            },
         ],
-        max_tokens=2000
+        max_tokens=2000,
     )
     response = _chat_completion(req)
     return _extract_message_text(response.choices[0].message)
-
 
 
 # ==================================================================
@@ -1175,38 +1438,45 @@ def batch_analyze_drawing(image_file, filename="drawing"):
             image_file,
             BATCH_PROMPT,
             f"Analyze this engineering drawing (filename: {filename}) and return the structured JSON report.",
-            max_tokens=800,
+            max_tokens=1200,
             response_format={"type": "json_object"},
         )
         parsed = _parse_json_response(result, f"Batch analysis ({filename})")
         return _sanitize_batch_analysis_result(parsed, filename)
     except Exception as e:
-        return _sanitize_batch_analysis_result({
-            "drawing_name": filename,
-            "part_number": "—",
-            "drawing_type": "Unknown",
-            "status": "Analysis Failed",
-            "manufacturability_score": 0,
-            "estimated_cost_usd": "—",
-            "complexity": "—",
-            "critical_issues": [str(e)],
-            "warnings": [],
-            "missing_dimensions": False,
-            "has_gdt": False,
-            "material_specified": False,
-            "tolerance_risk": "—",
-            "recommended_process": "—",
-            "summary": "Analysis could not be completed for this drawing."
-        }, filename)
+        return _sanitize_batch_analysis_result(
+            {
+                "drawing_name": filename,
+                "part_number": "—",
+                "drawing_type": "Unknown",
+                "status": "Analysis Failed",
+                "manufacturability_score": 0,
+                "estimated_cost_usd": "—",
+                "complexity": "—",
+                "critical_issues": [str(e)],
+                "warnings": [],
+                "missing_dimensions": False,
+                "has_gdt": False,
+                "material_specified": False,
+                "tolerance_risk": "—",
+                "recommended_process": "—",
+                "summary": "Analysis could not be completed for this drawing.",
+            },
+            filename,
+        )
 
 
 def generate_batch_excel(results):
     """Generate an Excel report from batch analysis results."""
     import io
-    results = [_sanitize_batch_analysis_result(r, f"drawing_{idx}") for idx, r in enumerate(results or [], 1)]
+
+    results = [
+        _sanitize_batch_analysis_result(r, f"drawing_{idx}")
+        for idx, r in enumerate(results or [], 1)
+    ]
     try:
         import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
     except ImportError:
         summary_rows = [
@@ -1266,14 +1536,14 @@ def generate_batch_excel(results):
     ws.title = "Batch Analysis Report"
 
     # ── Colour palette ──
-    ORANGE      = "F97316"
-    DARK        = "0D0D0D"
-    HEADER_BG   = "1A1A1A"
-    ROW_A       = "F9F9F9"
-    ROW_B       = "FFFFFF"
-    RED_BG      = "FEE2E2"
-    YELLOW_BG   = "FEF9C3"
-    GREEN_BG    = "DCFCE7"
+    ORANGE = "F97316"
+    DARK = "0D0D0D"
+    HEADER_BG = "1A1A1A"
+    ROW_A = "F9F9F9"
+    ROW_B = "FFFFFF"
+    RED_BG = "FEE2E2"
+    YELLOW_BG = "FEF9C3"
+    GREEN_BG = "DCFCE7"
 
     thin = Side(style="thin", color="E5E7EB")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -1282,26 +1552,36 @@ def generate_batch_excel(results):
     ws.merge_cells("A1:N1")
     title_cell = ws["A1"]
     title_cell.value = f"Draft AI — Batch Analysis Report   |   {datetime.now().strftime('%d %B %Y, %I:%M %p')}   |   {len(results)} drawings"
-    title_cell.font      = Font(name="Calibri", size=13, bold=True, color=ORANGE)
-    title_cell.fill      = PatternFill("solid", fgColor=DARK)
+    title_cell.font = Font(name="Calibri", size=13, bold=True, color=ORANGE)
+    title_cell.fill = PatternFill("solid", fgColor=DARK)
     title_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     ws.row_dimensions[1].height = 28
 
     # ── Column headers ──
     headers = [
-        "#", "Drawing Name", "Part Number", "Type", "Status",
-        "Mfg. Score", "Est. Cost (USD)", "Complexity",
-        "Tolerance Risk", "Missing Dims", "Has GD&T",
-        "Material Specified", "Process", "Summary"
+        "#",
+        "Drawing Name",
+        "Part Number",
+        "Type",
+        "Status",
+        "Mfg. Score",
+        "Est. Cost (USD)",
+        "Complexity",
+        "Tolerance Risk",
+        "Missing Dims",
+        "Has GD&T",
+        "Material Specified",
+        "Process",
+        "Summary",
     ]
     col_widths = [4, 28, 16, 14, 20, 12, 16, 12, 14, 12, 10, 16, 24, 40]
 
     for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
         cell = ws.cell(row=2, column=ci, value=h)
-        cell.font      = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        cell.fill      = PatternFill("solid", fgColor=HEADER_BG)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=HEADER_BG)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border    = border
+        cell.border = border
         ws.column_dimensions[get_column_letter(ci)].width = w
     ws.row_dimensions[2].height = 20
 
@@ -1322,9 +1602,12 @@ def generate_batch_excel(results):
         # Score colour
         score = r.get("manufacturability_score", 0)
         if isinstance(score, (int, float)):
-            if score >= 75:   score_bg = GREEN_BG
-            elif score >= 50: score_bg = YELLOW_BG
-            else:             score_bg = RED_BG
+            if score >= 75:
+                score_bg = GREEN_BG
+            elif score >= 50:
+                score_bg = YELLOW_BG
+            else:
+                score_bg = RED_BG
         else:
             score_bg = bg
 
@@ -1347,33 +1630,36 @@ def generate_batch_excel(results):
 
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
-            cell.font      = Font(name="Calibri", size=10)
+            cell.font = Font(name="Calibri", size=10)
             cell.alignment = Alignment(vertical="center", wrap_text=(ci == 14))
-            cell.border    = border
+            cell.border = border
 
             # Apply special bg
-            if ci == 5:   cell.fill = PatternFill("solid", fgColor=status_bg)
-            elif ci == 6: cell.fill = PatternFill("solid", fgColor=score_bg)
-            else:         cell.fill = PatternFill("solid", fgColor=bg)
+            if ci == 5:
+                cell.fill = PatternFill("solid", fgColor=status_bg)
+            elif ci == 6:
+                cell.fill = PatternFill("solid", fgColor=score_bg)
+            else:
+                cell.fill = PatternFill("solid", fgColor=bg)
 
         ws.row_dimensions[row].height = 18
 
     # ── Issues sheet ──
     ws2 = wb.create_sheet("Issues & Warnings")
     ws2["A1"].value = "Draft AI — Critical Issues & Warnings"
-    ws2["A1"].font  = Font(name="Calibri", size=13, bold=True, color=ORANGE)
-    ws2["A1"].fill  = PatternFill("solid", fgColor=DARK)
+    ws2["A1"].font = Font(name="Calibri", size=13, bold=True, color=ORANGE)
+    ws2["A1"].fill = PatternFill("solid", fgColor=DARK)
     ws2.merge_cells("A1:E1")
     ws2.row_dimensions[1].height = 28
 
     issue_headers = ["#", "Drawing Name", "Type", "Severity", "Issue / Warning"]
-    issue_widths  = [4, 28, 10, 12, 70]
+    issue_widths = [4, 28, 10, 12, 70]
     for ci, (h, w) in enumerate(zip(issue_headers, issue_widths), 1):
         cell = ws2.cell(row=2, column=ci, value=h)
-        cell.font      = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        cell.fill      = PatternFill("solid", fgColor=HEADER_BG)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=HEADER_BG)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border    = border
+        cell.border = border
         ws2.column_dimensions[get_column_letter(ci)].width = w
 
     irow = 3
@@ -1382,19 +1668,19 @@ def generate_batch_excel(results):
         for issue in r.get("critical_issues", []):
             for ci, val in enumerate([ri, name, "CRITICAL", "Critical", issue], 1):
                 cell = ws2.cell(row=irow, column=ci, value=val)
-                cell.font   = Font(name="Calibri", size=10)
-                cell.fill   = PatternFill("solid", fgColor=RED_BG)
+                cell.font = Font(name="Calibri", size=10)
+                cell.fill = PatternFill("solid", fgColor=RED_BG)
                 cell.border = border
-                cell.alignment = Alignment(vertical="center", wrap_text=(ci==5))
+                cell.alignment = Alignment(vertical="center", wrap_text=(ci == 5))
             ws2.row_dimensions[irow].height = 18
             irow += 1
         for warn in r.get("warnings", []):
             for ci, val in enumerate([ri, name, "WARNING", "Warning", warn], 1):
                 cell = ws2.cell(row=irow, column=ci, value=val)
-                cell.font   = Font(name="Calibri", size=10)
-                cell.fill   = PatternFill("solid", fgColor=YELLOW_BG)
+                cell.font = Font(name="Calibri", size=10)
+                cell.fill = PatternFill("solid", fgColor=YELLOW_BG)
                 cell.border = border
-                cell.alignment = Alignment(vertical="center", wrap_text=(ci==5))
+                cell.alignment = Alignment(vertical="center", wrap_text=(ci == 5))
             ws2.row_dimensions[irow].height = 18
             irow += 1
 
@@ -1407,91 +1693,229 @@ def generate_batch_excel(results):
 def generate_batch_pdf(results):
     """Generate a PDF summary report from batch analysis results."""
     _require_reportlab()
-    results = [_sanitize_batch_analysis_result(r, f"drawing_{idx}") for idx, r in enumerate(results or [], 1)]
+    results = [
+        _sanitize_batch_analysis_result(r, f"drawing_{idx}")
+        for idx, r in enumerate(results or [], 1)
+    ]
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        rightMargin=18*mm, leftMargin=18*mm,
-        topMargin=18*mm, bottomMargin=18*mm
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
     )
 
-    title_s  = ParagraphStyle('T',  fontSize=18, fontName='Helvetica-Bold', textColor=colors.HexColor('#f97316'), spaceAfter=3)
-    sub_s    = ParagraphStyle('S',  fontSize=9,  fontName='Helvetica',      textColor=colors.HexColor('#888888'), spaceAfter=2)
-    h2_s     = ParagraphStyle('H2', fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor('#111111'), spaceBefore=10, spaceAfter=5)
-    body_s   = ParagraphStyle('B',  fontSize=9,  fontName='Helvetica',      textColor=colors.HexColor('#333333'), leading=14, spaceAfter=3)
-    foot_s   = ParagraphStyle('F',  fontSize=7,  fontName='Helvetica',      textColor=colors.HexColor('#aaaaaa'), alignment=TA_CENTER)
+    title_s = ParagraphStyle(
+        "T",
+        fontSize=18,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#f97316"),
+        spaceAfter=3,
+    )
+    sub_s = ParagraphStyle(
+        "S",
+        fontSize=9,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#888888"),
+        spaceAfter=2,
+    )
+    h2_s = ParagraphStyle(
+        "H2",
+        fontSize=11,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#111111"),
+        spaceBefore=10,
+        spaceAfter=5,
+    )
+    body_s = ParagraphStyle(
+        "B",
+        fontSize=9,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#333333"),
+        leading=14,
+        spaceAfter=3,
+    )
+    foot_s = ParagraphStyle(
+        "F",
+        fontSize=7,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#aaaaaa"),
+        alignment=TA_CENTER,
+    )
 
     story = []
     # Header block — no overlap
-    batch_hdr_data = [[
-        Paragraph('<font color="#f97316"><b>Draft AI</b></font>',
-            ParagraphStyle('BHL', fontSize=22, fontName='Helvetica-Bold', textColor=colors.HexColor('#f97316'), leading=26)),
-        Paragraph(datetime.now().strftime("%d %B %Y, %I:%M %p"),
-            ParagraphStyle('BHR', fontSize=8, fontName='Helvetica', textColor=colors.HexColor('#aaaaaa'), leading=12, alignment=2)),
-    ]]
-    batch_hdr_tbl = Table(batch_hdr_data, colWidths=[80*mm, None])
-    batch_hdr_tbl.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),('BOTTOMPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0)]))
+    batch_hdr_data = [
+        [
+            Paragraph(
+                '<font color="#f97316"><b>Draft AI</b></font>',
+                ParagraphStyle(
+                    "BHL",
+                    fontSize=22,
+                    fontName="Helvetica-Bold",
+                    textColor=colors.HexColor("#f97316"),
+                    leading=26,
+                ),
+            ),
+            Paragraph(
+                datetime.now().strftime("%d %B %Y, %I:%M %p"),
+                ParagraphStyle(
+                    "BHR",
+                    fontSize=8,
+                    fontName="Helvetica",
+                    textColor=colors.HexColor("#aaaaaa"),
+                    leading=12,
+                    alignment=2,
+                ),
+            ),
+        ]
+    ]
+    batch_hdr_tbl = Table(batch_hdr_data, colWidths=[80 * mm, None])
+    batch_hdr_tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     story.append(batch_hdr_tbl)
-    story.append(Spacer(1, 2*mm))
+    story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(f"Batch Analysis Report  —  {len(results)} drawings", sub_s))
-    story.append(Spacer(1, 3*mm))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#f97316'), spaceAfter=5*mm))
+    story.append(Spacer(1, 3 * mm))
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1.5,
+            color=colors.HexColor("#f97316"),
+            spaceAfter=5 * mm,
+        )
+    )
 
     # Summary stats
-    total   = len(results)
-    ready   = sum(1 for r in results if "Ready" in r.get("status",""))
-    needs   = sum(1 for r in results if "Revision" in r.get("status",""))
-    rework  = sum(1 for r in results if "Major" in r.get("status","") or "Failed" in r.get("status",""))
-    scores  = [r.get("manufacturability_score",0) for r in results if isinstance(r.get("manufacturability_score"),int)]
-    avg_sc  = round(sum(scores)/len(scores)) if scores else "—"
+    total = len(results)
+    ready = sum(1 for r in results if "Ready" in r.get("status", ""))
+    needs = sum(1 for r in results if "Revision" in r.get("status", ""))
+    rework = sum(
+        1
+        for r in results
+        if "Major" in r.get("status", "") or "Failed" in r.get("status", "")
+    )
+    scores = [
+        r.get("manufacturability_score", 0)
+        for r in results
+        if isinstance(r.get("manufacturability_score"), int)
+    ]
+    avg_sc = round(sum(scores) / len(scores)) if scores else "—"
 
     story.append(Paragraph("SUMMARY", h2_s))
     summary_data = [
         ["Total Drawings", str(total), "Production Ready", str(ready)],
-        ["Needs Revision",  str(needs),  "Major Rework",    str(rework)],
-        ["Avg Mfg. Score",  str(avg_sc), "", ""],
+        ["Needs Revision", str(needs), "Major Rework", str(rework)],
+        ["Avg Mfg. Score", str(avg_sc), "", ""],
     ]
-    st_table = Table(summary_data, colWidths=[42*mm, 20*mm, 42*mm, 20*mm])
-    st_table.setStyle(TableStyle([
-        ('FONTNAME',  (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE',  (0,0), (-1,-1), 9),
-        ('FONTNAME',  (0,0), (0,-1), 'Helvetica-Bold'),
-        ('FONTNAME',  (2,0), (2,-1), 'Helvetica-Bold'),
-        ('ROWBACKGROUNDS', (0,0), (-1,-1), [colors.HexColor('#fafafa'), colors.HexColor('#f3f3f3')]),
-        ('GRID', (0,0), (-1,-1), 0.4, colors.HexColor('#e0e0e0')),
-        ('PADDING', (0,0), (-1,-1), 5),
-    ]))
+    st_table = Table(summary_data, colWidths=[42 * mm, 20 * mm, 42 * mm, 20 * mm])
+    st_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 0),
+                    (-1, -1),
+                    [colors.HexColor("#fafafa"), colors.HexColor("#f3f3f3")],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e0e0e0")),
+                ("PADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
     story.append(st_table)
-    story.append(Spacer(1, 5*mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#eeeeee'), spaceAfter=4*mm))
+    story.append(Spacer(1, 5 * mm))
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=0.5,
+            color=colors.HexColor("#eeeeee"),
+            spaceAfter=4 * mm,
+        )
+    )
 
     # Per-drawing entries
     story.append(Paragraph("DRAWING DETAILS", h2_s))
     for i, r in enumerate(results, 1):
-        status = r.get("status","—")
-        score  = r.get("manufacturability_score","—")
-        clr    = '#16a34a' if "Ready" in status else ('#d97706' if "Revision" in status else '#dc2626')
-        story.append(Paragraph(
-            f'<font color="#f97316">{i}.</font>  <b>{r.get("drawing_name","—")}</b>  '
-            f'<font color="{clr}">[ {status} ]</font>  '
-            f'Score: <b>{score}/100</b>  |  Cost: <b>${r.get("estimated_cost_usd","—")}</b>  |  {r.get("complexity","—")} complexity',
-            body_s
-        ))
-        story.append(Paragraph(r.get("summary","—"), ParagraphStyle('bs', fontSize=8, fontName='Helvetica', textColor=colors.HexColor('#555555'), leftIndent=12, spaceAfter=2)))
+        status = r.get("status", "—")
+        score = r.get("manufacturability_score", "—")
+        clr = (
+            "#16a34a"
+            if "Ready" in status
+            else ("#d97706" if "Revision" in status else "#dc2626")
+        )
+        story.append(
+            Paragraph(
+                f'<font color="#f97316">{i}.</font>  <b>{r.get("drawing_name", "—")}</b>  '
+                f'<font color="{clr}">[ {status} ]</font>  '
+                f"Score: <b>{score}/100</b>  |  Cost: <b>${r.get('estimated_cost_usd', '—')}</b>  |  {r.get('complexity', '—')} complexity",
+                body_s,
+            )
+        )
+        story.append(
+            Paragraph(
+                r.get("summary", "—"),
+                ParagraphStyle(
+                    "bs",
+                    fontSize=8,
+                    fontName="Helvetica",
+                    textColor=colors.HexColor("#555555"),
+                    leftIndent=12,
+                    spaceAfter=2,
+                ),
+            )
+        )
 
-        issues = r.get("critical_issues",[])
-        warns  = r.get("warnings",[])
+        issues = r.get("critical_issues", [])
+        warns = r.get("warnings", [])
         if issues:
             for iss in issues:
-                story.append(Paragraph(f'<font color="#dc2626">  CRITICAL: {iss}</font>', ParagraphStyle('is', fontSize=8, fontName='Helvetica', leftIndent=12, spaceAfter=1)))
+                story.append(
+                    Paragraph(
+                        f'<font color="#dc2626">  CRITICAL: {iss}</font>',
+                        ParagraphStyle(
+                            "is",
+                            fontSize=8,
+                            fontName="Helvetica",
+                            leftIndent=12,
+                            spaceAfter=1,
+                        ),
+                    )
+                )
         if warns:
             for w in warns:
-                story.append(Paragraph(f'<font color="#d97706">  WARNING: {w}</font>', ParagraphStyle('ws', fontSize=8, fontName='Helvetica', leftIndent=12, spaceAfter=1)))
-        story.append(Spacer(1, 3*mm))
+                story.append(
+                    Paragraph(
+                        f'<font color="#d97706">  WARNING: {w}</font>',
+                        ParagraphStyle(
+                            "ws",
+                            fontSize=8,
+                            fontName="Helvetica",
+                            leftIndent=12,
+                            spaceAfter=1,
+                        ),
+                    )
+                )
+        story.append(Spacer(1, 3 * mm))
 
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#dddddd')))
-    story.append(Spacer(1, 3*mm))
-    story.append(Paragraph("Draft AI  ·  Powered by GPT-4o Vision", foot_s))
+    story.append(
+        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#dddddd"))
+    )
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph("Draft AI  ·  Powered by Claude · Gemini Vision", foot_s))
 
     doc.build(story)
     buffer.seek(0)
@@ -1502,71 +1926,149 @@ def generate_pdf(messages_display, drawing_name="drawing", title_block_data=None
     _require_reportlab()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        rightMargin=20*mm, leftMargin=20*mm,
-        topMargin=20*mm, bottomMargin=20*mm
+        buffer,
+        pagesize=A4,
+        rightMargin=20 * mm,
+        leftMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
     )
 
     title_style = ParagraphStyle(
-        'T', fontSize=21, leading=24, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#f97316'), spaceAfter=0
+        "T",
+        fontSize=21,
+        leading=24,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#f97316"),
+        spaceAfter=0,
     )
     sub_style = ParagraphStyle(
-        'S', fontSize=12, leading=15, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#555555'), spaceAfter=0
+        "S",
+        fontSize=12,
+        leading=15,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#555555"),
+        spaceAfter=0,
     )
     meta_style = ParagraphStyle(
-        'M', fontSize=8.5, leading=11, fontName='Helvetica',
-        textColor=colors.HexColor('#888888')
+        "M",
+        fontSize=8.5,
+        leading=11,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#888888"),
     )
     q_style = ParagraphStyle(
-        'Q', fontSize=10.5, leading=13, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#f97316'), spaceBefore=12, spaceAfter=5
+        "Q",
+        fontSize=10.5,
+        leading=13,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#f97316"),
+        spaceBefore=12,
+        spaceAfter=5,
     )
     a_style = ParagraphStyle(
-        'A', fontSize=9.5, leading=15, fontName='Helvetica',
-        textColor=colors.HexColor('#333333'), spaceAfter=6, leftIndent=10
+        "A",
+        fontSize=9.5,
+        leading=15,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#333333"),
+        spaceAfter=6,
+        leftIndent=10,
     )
     tb_key = ParagraphStyle(
-        'TK', fontSize=9, leading=12, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#444444')
+        "TK",
+        fontSize=9,
+        leading=12,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#444444"),
     )
     tb_val = ParagraphStyle(
-        'TV', fontSize=9, leading=12, fontName='Helvetica',
-        textColor=colors.HexColor('#222222')
+        "TV",
+        fontSize=9,
+        leading=12,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#222222"),
     )
     foot_style = ParagraphStyle(
-        'F', fontSize=7.5, leading=10, fontName='Helvetica',
-        textColor=colors.HexColor('#888888'), alignment=TA_CENTER
+        "F",
+        fontSize=7.5,
+        leading=10,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#888888"),
+        alignment=TA_CENTER,
     )
     sec_style = ParagraphStyle(
-        'SEC', fontSize=11, leading=14, fontName='Helvetica-Bold',
-        textColor=colors.HexColor('#222222'), spaceBefore=10, spaceAfter=6
+        "SEC",
+        fontSize=11,
+        leading=14,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#222222"),
+        spaceBefore=10,
+        spaceAfter=6,
     )
 
     story = []
 
     # Header block — logo left, meta right, no overlap
-    header_data = [[
-        Paragraph('<font color="#f97316"><b>Draft AI</b></font>', ParagraphStyle('HL', fontSize=22, fontName='Helvetica-Bold', textColor=colors.HexColor('#f97316'), leading=26)),
-        Paragraph(
-            f'<font color="#888888">Generated: {datetime.now().strftime("%d %B %Y, %I:%M %p")}</font><br/>'
-            f'<font color="#aaaaaa">File: {drawing_name}</font>',
-            ParagraphStyle('HR', fontSize=8, fontName='Helvetica', textColor=colors.HexColor('#888888'), leading=12, alignment=2)
-        ),
-    ]]
-    header_tbl = Table(header_data, colWidths=[80*mm, None])
-    header_tbl.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-        ('TOPPADDING', (0,0), (-1,-1), 0),
-    ]))
+    header_data = [
+        [
+            Paragraph(
+                '<font color="#f97316"><b>Draft AI</b></font>',
+                ParagraphStyle(
+                    "HL",
+                    fontSize=22,
+                    fontName="Helvetica-Bold",
+                    textColor=colors.HexColor("#f97316"),
+                    leading=26,
+                ),
+            ),
+            Paragraph(
+                f'<font color="#888888">Generated: {datetime.now().strftime("%d %B %Y, %I:%M %p")}</font><br/>'
+                f'<font color="#aaaaaa">File: {drawing_name}</font>',
+                ParagraphStyle(
+                    "HR",
+                    fontSize=8,
+                    fontName="Helvetica",
+                    textColor=colors.HexColor("#888888"),
+                    leading=12,
+                    alignment=2,
+                ),
+            ),
+        ]
+    ]
+    header_tbl = Table(header_data, colWidths=[80 * mm, None])
+    header_tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     story.append(header_tbl)
-    story.append(Spacer(1, 2*mm))
-    story.append(Paragraph("Engineering Drawing Analysis Report",
-        ParagraphStyle('SUB', fontSize=11, fontName='Helvetica', textColor=colors.HexColor('#555555'), spaceAfter=0)))
-    story.append(Spacer(1, 4*mm))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#f97316'), spaceAfter=6*mm))
+    story.append(Spacer(1, 2 * mm))
+    story.append(
+        Paragraph(
+            "Engineering Drawing Analysis Report",
+            ParagraphStyle(
+                "SUB",
+                fontSize=11,
+                fontName="Helvetica",
+                textColor=colors.HexColor("#555555"),
+                spaceAfter=0,
+            ),
+        )
+    )
+    story.append(Spacer(1, 4 * mm))
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1.5,
+            color=colors.HexColor("#f97316"),
+            spaceAfter=6 * mm,
+        )
+    )
 
     if title_block_data:
         story.append(Paragraph("TITLE BLOCK", sec_style))
@@ -1580,18 +2082,34 @@ def generate_pdf(messages_display, drawing_name="drawing", title_block_data=None
                     table_data.append([Paragraph(key, tb_key), Paragraph(val, tb_val)])
         if table_data:
             table = Table(table_data, colWidths=[50 * mm, 110 * mm])
-            table.setStyle(TableStyle([
-                ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.HexColor('#fafafa'), colors.HexColor('#f3f3f3')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ]))
+            table.setStyle(
+                TableStyle(
+                    [
+                        (
+                            "ROWBACKGROUNDS",
+                            (0, 0),
+                            (-1, -1),
+                            [colors.HexColor("#fafafa"), colors.HexColor("#f3f3f3")],
+                        ),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e0e0e0")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]
+                )
+            )
             story.append(table)
             story.append(Spacer(1, 6 * mm))
-            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#eeeeee'), spaceAfter=4 * mm))
+            story.append(
+                HRFlowable(
+                    width="100%",
+                    thickness=0.5,
+                    color=colors.HexColor("#eeeeee"),
+                    spaceAfter=4 * mm,
+                )
+            )
 
     story.append(Paragraph("ANALYSIS", sec_style))
     q_num = 1
@@ -1611,19 +2129,31 @@ def generate_pdf(messages_display, drawing_name="drawing", title_block_data=None
             clean = answer.replace("**", "").replace("*", "")
             clean = clean.replace("\n", "<br/>")
             story.append(Paragraph(clean, a_style))
-            story.append(HRFlowable(width="100%", thickness=0.4, color=colors.HexColor('#eeeeee'), spaceBefore=4 * mm, spaceAfter=2 * mm))
+            story.append(
+                HRFlowable(
+                    width="100%",
+                    thickness=0.4,
+                    color=colors.HexColor("#eeeeee"),
+                    spaceBefore=4 * mm,
+                    spaceAfter=2 * mm,
+                )
+            )
             i += 2
         else:
             i += 1
 
     story.append(Spacer(1, 7 * mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#dddddd')))
+    story.append(
+        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#dddddd"))
+    )
     story.append(Spacer(1, 3.5 * mm))
-    story.append(Paragraph("Made with Draft AI | Powered by GPT-4o Vision", foot_style))
+    story.append(Paragraph("Made with Draft AI | Powered by Claude · Gemini Vision", foot_style))
 
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+
 # ══════════════════════════════════════════════════════════════════
 # FEATURE: BOM GENERATOR
 # ══════════════════════════════════════════════════════════════════
@@ -1669,7 +2199,7 @@ def generate_bom(image_file):
         image_file,
         BOM_PROMPT,
         "Extract the complete Bill of Materials from this engineering drawing. Return structured JSON only.",
-        max_tokens=2000,
+        max_tokens=2200,
         response_format={"type": "json_object"},
     )
     return _parse_json_response(result, "BOM extraction")
@@ -1678,9 +2208,10 @@ def generate_bom(image_file):
 def generate_bom_excel(bom_data):
     """Generate a professional BOM Excel file from parsed BOM JSON."""
     import io
+
     try:
         import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
     except ImportError:
         meta_rows = [
@@ -1690,7 +2221,16 @@ def generate_bom_excel(bom_data):
             ["Date", bom_data.get("date", "Not specified")],
             ["Generated", datetime.now().strftime("%d %B %Y, %I:%M %p")],
             [],
-            ["ITEM", "PART NUMBER", "DESCRIPTION", "QTY", "MATERIAL", "STANDARD/SPEC", "FINISH", "NOTES"],
+            [
+                "ITEM",
+                "PART NUMBER",
+                "DESCRIPTION",
+                "QTY",
+                "MATERIAL",
+                "STANDARD/SPEC",
+                "FINISH",
+                "NOTES",
+            ],
         ]
         item_rows = []
         for idx, item in enumerate(bom_data.get("items", []), 1):
@@ -1707,8 +2247,11 @@ def generate_bom_excel(bom_data):
                 ]
             )
         total_qty = sum(
-            value for value in (
-                item.get("quantity", 0) if isinstance(item.get("quantity", 0), int) else 0
+            value
+            for value in (
+                item.get("quantity", 0)
+                if isinstance(item.get("quantity", 0), int)
+                else 0
                 for item in bom_data.get("items", [])
             )
         )
@@ -1716,29 +2259,31 @@ def generate_bom_excel(bom_data):
             [],
             [f"TOTAL ITEMS: {len(bom_data.get('items', []))}", "", "", total_qty],
             [],
-            ["Generated by Draft AI | Powered by GPT-4o Vision"],
+            ["Generated by Draft AI | Powered by Claude · Gemini Vision"],
         ]
-        return _build_basic_xlsx([("Bill of Materials", meta_rows + item_rows + footer_rows)])
+        return _build_basic_xlsx(
+            [("Bill of Materials", meta_rows + item_rows + footer_rows)]
+        )
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bill of Materials"
 
-    ORANGE   = "F97316"
-    DARK     = "0D0D0D"
-    HEADER   = "1A1A1A"
-    ROW_A    = "FAFAFA"
-    ROW_B    = "FFFFFF"
+    ORANGE = "F97316"
+    DARK = "0D0D0D"
+    HEADER = "1A1A1A"
+    ROW_A = "FAFAFA"
+    ROW_B = "FFFFFF"
     ORANGE_L = "FFF7ED"
 
-    thin   = Side(style="thin", color="E5E7EB")
+    thin = Side(style="thin", color="E5E7EB")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     # Title block
     ws.merge_cells("A1:H1")
-    ws["A1"].value     = "BILL OF MATERIALS"
-    ws["A1"].font      = Font(name="Arial", size=14, bold=True, color=ORANGE)
-    ws["A1"].fill      = PatternFill("solid", fgColor=DARK)
+    ws["A1"].value = "BILL OF MATERIALS"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True, color=ORANGE)
+    ws["A1"].fill = PatternFill("solid", fgColor=DARK)
     ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
     ws.row_dimensions[1].height = 30
 
@@ -1750,26 +2295,39 @@ def generate_bom_excel(bom_data):
         ("Generated:", datetime.now().strftime("%d %B %Y, %I:%M %p")),
     ]
     for r, (k, v) in enumerate(meta, 2):
-        ws.cell(row=r, column=1, value=k).font = Font(name="Arial", size=9, bold=True, color="555555")
-        ws.cell(row=r, column=2, value=v).font = Font(name="Arial", size=9, color="111111")
+        ws.cell(row=r, column=1, value=k).font = Font(
+            name="Arial", size=9, bold=True, color="555555"
+        )
+        ws.cell(row=r, column=2, value=v).font = Font(
+            name="Arial", size=9, color="111111"
+        )
         ws.row_dimensions[r].height = 15
 
-    headers    = ["ITEM", "PART NUMBER", "DESCRIPTION", "QTY", "MATERIAL", "STANDARD/SPEC", "FINISH", "NOTES"]
+    headers = [
+        "ITEM",
+        "PART NUMBER",
+        "DESCRIPTION",
+        "QTY",
+        "MATERIAL",
+        "STANDARD/SPEC",
+        "FINISH",
+        "NOTES",
+    ]
     col_widths = [6, 18, 32, 6, 24, 20, 18, 28]
     hrow = len(meta) + 2
     for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
         cell = ws.cell(row=hrow, column=ci, value=h)
-        cell.font      = Font(name="Arial", size=9, bold=True, color="FFFFFF")
-        cell.fill      = PatternFill("solid", fgColor=HEADER)
+        cell.font = Font(name="Arial", size=9, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=HEADER)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border    = border
+        cell.border = border
         ws.column_dimensions[get_column_letter(ci)].width = w
     ws.row_dimensions[hrow].height = 20
 
     items = bom_data.get("items", [])
     for ri, item in enumerate(items, 1):
         row = hrow + ri
-        bg  = ROW_A if ri % 2 == 0 else ROW_B
+        bg = ROW_A if ri % 2 == 0 else ROW_B
         vals = [
             item.get("item_no", ri),
             item.get("part_number", "Not specified"),
@@ -1782,32 +2340,44 @@ def generate_bom_excel(bom_data):
         ]
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
-            cell.font      = Font(name="Arial", size=9)
-            cell.fill      = PatternFill("solid", fgColor=bg)
-            cell.border    = border
+            cell.font = Font(name="Arial", size=9)
+            cell.fill = PatternFill("solid", fgColor=bg)
+            cell.border = border
             cell.alignment = Alignment(
                 horizontal="center" if ci in (1, 4) else "left",
                 vertical="center",
-                wrap_text=(ci in (3, 5, 8))
+                wrap_text=(ci in (3, 5, 8)),
             )
         ws.row_dimensions[row].height = 16
 
     # Totals row
     total_row = hrow + len(items) + 1
     ws.merge_cells(f"A{total_row}:C{total_row}")
-    ws.cell(row=total_row, column=1, value=f"TOTAL ITEMS: {len(items)}").font = Font(name="Arial", size=9, bold=True, color=ORANGE)
-    ws.cell(row=total_row, column=1).fill      = PatternFill("solid", fgColor=ORANGE_L)
-    ws.cell(row=total_row, column=1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    qty_formula = f"=SUM(D{hrow+1}:D{hrow+len(items)})"
-    ws.cell(row=total_row, column=4, value=qty_formula).font = Font(name="Arial", size=9, bold=True)
-    ws.cell(row=total_row, column=4).fill      = PatternFill("solid", fgColor=ORANGE_L)
-    ws.cell(row=total_row, column=4).alignment = Alignment(horizontal="center", vertical="center")
+    ws.cell(row=total_row, column=1, value=f"TOTAL ITEMS: {len(items)}").font = Font(
+        name="Arial", size=9, bold=True, color=ORANGE
+    )
+    ws.cell(row=total_row, column=1).fill = PatternFill("solid", fgColor=ORANGE_L)
+    ws.cell(row=total_row, column=1).alignment = Alignment(
+        horizontal="left", vertical="center", indent=1
+    )
+    qty_formula = f"=SUM(D{hrow + 1}:D{hrow + len(items)})"
+    ws.cell(row=total_row, column=4, value=qty_formula).font = Font(
+        name="Arial", size=9, bold=True
+    )
+    ws.cell(row=total_row, column=4).fill = PatternFill("solid", fgColor=ORANGE_L)
+    ws.cell(row=total_row, column=4).alignment = Alignment(
+        horizontal="center", vertical="center"
+    )
     for ci in range(5, 9):
         ws.cell(row=total_row, column=ci).fill = PatternFill("solid", fgColor=ORANGE_L)
 
     foot_row = total_row + 2
     ws.merge_cells(f"A{foot_row}:H{foot_row}")
-    ws.cell(row=foot_row, column=1, value="Generated by Draft AI  |  Powered by GPT-4o Vision").font = Font(name="Arial", size=7, color="AAAAAA", italic=True)
+    ws.cell(
+        row=foot_row,
+        column=1,
+        value="Generated by Draft AI  |  Powered by Claude · Gemini Vision",
+    ).font = Font(name="Arial", size=7, color="AAAAAA", italic=True)
     ws.cell(row=foot_row, column=1).alignment = Alignment(horizontal="center")
 
     buffer = io.BytesIO()
@@ -1816,105 +2386,229 @@ def generate_bom_excel(bom_data):
     return buffer
 
 
-
 def generate_bom_pdf(bom_data):
     """Generate a clean PDF report from parsed BOM JSON."""
     _require_reportlab()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        rightMargin=18*mm, leftMargin=18*mm,
-        topMargin=18*mm, bottomMargin=18*mm
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
     )
-    title_s  = ParagraphStyle('BT',  fontSize=22, fontName='Helvetica-Bold', textColor=colors.HexColor('#f97316'), leading=26)
-    sub_s    = ParagraphStyle('BS',  fontSize=10, fontName='Helvetica',      textColor=colors.HexColor('#555555'), spaceAfter=2)
-    label_s  = ParagraphStyle('BL',  fontSize=8,  fontName='Helvetica-Bold', textColor=colors.HexColor('#888888'), leading=11, spaceAfter=0)
-    meta_s   = ParagraphStyle('BM',  fontSize=8,  fontName='Helvetica',      textColor=colors.HexColor('#aaaaaa'), leading=11, alignment=2)
-    th_s     = ParagraphStyle('BTH', fontSize=8,  fontName='Helvetica-Bold', textColor=colors.white,               leading=11)
-    td_s     = ParagraphStyle('BTD', fontSize=8,  fontName='Helvetica',      textColor=colors.HexColor('#222222'), leading=11)
-    foot_s   = ParagraphStyle('BF',  fontSize=7,  fontName='Helvetica',      textColor=colors.HexColor('#aaaaaa'), alignment=TA_CENTER)
+    title_s = ParagraphStyle(
+        "BT",
+        fontSize=22,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#f97316"),
+        leading=26,
+    )
+    sub_s = ParagraphStyle(
+        "BS",
+        fontSize=10,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#555555"),
+        spaceAfter=2,
+    )
+    label_s = ParagraphStyle(
+        "BL",
+        fontSize=8,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#888888"),
+        leading=11,
+        spaceAfter=0,
+    )
+    meta_s = ParagraphStyle(
+        "BM",
+        fontSize=8,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#aaaaaa"),
+        leading=11,
+        alignment=2,
+    )
+    th_s = ParagraphStyle(
+        "BTH", fontSize=8, fontName="Helvetica-Bold", textColor=colors.white, leading=11
+    )
+    td_s = ParagraphStyle(
+        "BTD",
+        fontSize=8,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#222222"),
+        leading=11,
+    )
+    foot_s = ParagraphStyle(
+        "BF",
+        fontSize=7,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#aaaaaa"),
+        alignment=TA_CENTER,
+    )
 
     story = []
     items = bom_data.get("items", [])
     total_qty = sum(int(it.get("quantity", 1)) for it in items)
 
     # Header — no overlap
-    hdr_data = [[
-        Paragraph('<font color="#f97316"><b>Draft AI</b></font>', title_s),
-        Paragraph(datetime.now().strftime("%d %B %Y, %I:%M %p"), meta_s),
-    ]]
-    hdr_tbl = Table(hdr_data, colWidths=[80*mm, None])
-    hdr_tbl.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),('BOTTOMPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0)]))
+    hdr_data = [
+        [
+            Paragraph('<font color="#f97316"><b>Draft AI</b></font>', title_s),
+            Paragraph(datetime.now().strftime("%d %B %Y, %I:%M %p"), meta_s),
+        ]
+    ]
+    hdr_tbl = Table(hdr_data, colWidths=[80 * mm, None])
+    hdr_tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     story.append(hdr_tbl)
-    story.append(Spacer(1, 2*mm))
+    story.append(Spacer(1, 2 * mm))
     story.append(Paragraph("Bill of Materials Report", sub_s))
-    story.append(Spacer(1, 3*mm))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#f97316'), spaceAfter=4*mm))
+    story.append(Spacer(1, 3 * mm))
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1.5,
+            color=colors.HexColor("#f97316"),
+            spaceAfter=4 * mm,
+        )
+    )
 
     # Assembly metadata
     meta_rows = [
-        ["Assembly", bom_data.get("assembly_name","—"),  "Drawing No.", bom_data.get("drawing_number","—")],
-        ["Revision",  bom_data.get("revision","—"),      "Date",        bom_data.get("date","—")],
-        ["Total Parts", str(len(items)),                 "Total Qty",   str(total_qty)],
+        [
+            "Assembly",
+            bom_data.get("assembly_name", "—"),
+            "Drawing No.",
+            bom_data.get("drawing_number", "—"),
+        ],
+        ["Revision", bom_data.get("revision", "—"), "Date", bom_data.get("date", "—")],
+        ["Total Parts", str(len(items)), "Total Qty", str(total_qty)],
     ]
-    lbl_s2 = ParagraphStyle('L2', fontSize=8, fontName='Helvetica-Bold', textColor=colors.HexColor('#444444'))
-    val_s2 = ParagraphStyle('V2', fontSize=8, fontName='Helvetica',      textColor=colors.HexColor('#111111'))
-    meta_tbl_data = [[Paragraph(r[0],lbl_s2), Paragraph(str(r[1]),val_s2), Paragraph(r[2],lbl_s2), Paragraph(str(r[3]),val_s2)] for r in meta_rows]
-    meta_tbl = Table(meta_tbl_data, colWidths=[32*mm, 55*mm, 32*mm, 55*mm])
-    meta_tbl.setStyle(TableStyle([
-        ('FONTNAME',(0,0),(-1,-1),'Helvetica'), ('FONTSIZE',(0,0),(-1,-1),8),
-        ('ROWBACKGROUNDS',(0,0),(-1,-1),[colors.HexColor('#fafafa'),colors.HexColor('#f3f3f3')]),
-        ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#e0e0e0')),
-        ('PADDING',(0,0),(-1,-1),5),
-    ]))
+    lbl_s2 = ParagraphStyle(
+        "L2",
+        fontSize=8,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#444444"),
+    )
+    val_s2 = ParagraphStyle(
+        "V2", fontSize=8, fontName="Helvetica", textColor=colors.HexColor("#111111")
+    )
+    meta_tbl_data = [
+        [
+            Paragraph(r[0], lbl_s2),
+            Paragraph(str(r[1]), val_s2),
+            Paragraph(r[2], lbl_s2),
+            Paragraph(str(r[3]), val_s2),
+        ]
+        for r in meta_rows
+    ]
+    meta_tbl = Table(meta_tbl_data, colWidths=[32 * mm, 55 * mm, 32 * mm, 55 * mm])
+    meta_tbl.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 0),
+                    (-1, -1),
+                    [colors.HexColor("#fafafa"), colors.HexColor("#f3f3f3")],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e0e0e0")),
+                ("PADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
     story.append(meta_tbl)
-    story.append(Spacer(1, 5*mm))
+    story.append(Spacer(1, 5 * mm))
 
     # BOM table
-    headers = ["#", "Part No.", "Description", "Qty", "Material", "Standard", "Finish", "Notes"]
-    col_w   = [10*mm, 28*mm, 44*mm, 10*mm, 30*mm, 24*mm, 22*mm, 6*mm]
+    headers = [
+        "#",
+        "Part No.",
+        "Description",
+        "Qty",
+        "Material",
+        "Standard",
+        "Finish",
+        "Notes",
+    ]
+    col_w = [10 * mm, 28 * mm, 44 * mm, 10 * mm, 30 * mm, 24 * mm, 22 * mm, 6 * mm]
     tbl_data = [[Paragraph(h, th_s) for h in headers]]
     for i, item in enumerate(items):
-        row_s = ParagraphStyle(f'r{i}', fontSize=7.5, fontName='Helvetica',
-                               textColor=colors.HexColor('#222222'), leading=10)
-        tbl_data.append([
-            Paragraph(str(item.get("item_no", i+1)), row_s),
-            Paragraph(str(item.get("part_number","—")), row_s),
-            Paragraph(str(item.get("description","—")), row_s),
-            Paragraph(str(item.get("quantity",1)), row_s),
-            Paragraph(str(item.get("material","—")), row_s),
-            Paragraph(str(item.get("standard","—")), row_s),
-            Paragraph(str(item.get("finish","—")), row_s),
-            Paragraph(str(item.get("notes","")), row_s),
-        ])
+        row_s = ParagraphStyle(
+            f"r{i}",
+            fontSize=7.5,
+            fontName="Helvetica",
+            textColor=colors.HexColor("#222222"),
+            leading=10,
+        )
+        tbl_data.append(
+            [
+                Paragraph(str(item.get("item_no", i + 1)), row_s),
+                Paragraph(str(item.get("part_number", "—")), row_s),
+                Paragraph(str(item.get("description", "—")), row_s),
+                Paragraph(str(item.get("quantity", 1)), row_s),
+                Paragraph(str(item.get("material", "—")), row_s),
+                Paragraph(str(item.get("standard", "—")), row_s),
+                Paragraph(str(item.get("finish", "—")), row_s),
+                Paragraph(str(item.get("notes", "")), row_s),
+            ]
+        )
 
     bom_tbl = Table(tbl_data, colWidths=col_w, repeatRows=1)
     row_colors = []
     for ri in range(1, len(tbl_data)):
-        bg = colors.HexColor('#fafafa') if ri % 2 == 0 else colors.white
-        row_colors.append(('ROWBACKGROUNDS',(0,ri),(- 1,ri),[bg]))
-    bom_tbl.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a1a1a')),
-        ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
-        ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE',   (0,0), (-1,0), 8),
-        ('GRID',       (0,0), (-1,-1), 0.4, colors.HexColor('#e0e0e0')),
-        ('PADDING',    (0,0), (-1,-1), 4),
-        ('VALIGN',     (0,0), (-1,-1), 'TOP'),
-        *row_colors,
-    ]))
+        bg = colors.HexColor("#fafafa") if ri % 2 == 0 else colors.white
+        row_colors.append(("ROWBACKGROUNDS", (0, ri), (-1, ri), [bg]))
+    bom_tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a1a")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 8),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e0e0e0")),
+                ("PADDING", (0, 0), (-1, -1), 4),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                *row_colors,
+            ]
+        )
+    )
     story.append(bom_tbl)
-    story.append(Spacer(1, 4*mm))
+    story.append(Spacer(1, 4 * mm))
 
     # Summary note
     if bom_data.get("summary"):
-        story.append(Paragraph(bom_data["summary"],
-            ParagraphStyle('SUM', fontSize=8, fontName='Helvetica', textColor=colors.HexColor('#555555'), leading=12, leftIndent=4)))
-        story.append(Spacer(1, 4*mm))
+        story.append(
+            Paragraph(
+                bom_data["summary"],
+                ParagraphStyle(
+                    "SUM",
+                    fontSize=8,
+                    fontName="Helvetica",
+                    textColor=colors.HexColor("#555555"),
+                    leading=12,
+                    leftIndent=4,
+                ),
+            )
+        )
+        story.append(Spacer(1, 4 * mm))
 
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#dddddd')))
-    story.append(Spacer(1, 3*mm))
-    story.append(Paragraph("Draft AI  ·  Bill of Materials  ·  Powered by GPT-4o Vision", foot_s))
+    story.append(
+        HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#dddddd"))
+    )
+    story.append(Spacer(1, 3 * mm))
+    story.append(
+        Paragraph("Draft AI  ·  Bill of Materials  ·  Powered by Claude · Gemini Vision", foot_s)
+    )
 
     doc.build(story)
     buffer.seek(0)
@@ -1974,7 +2668,7 @@ def check_drawing_standards(image_file):
         image_file,
         STANDARDS_CHECKER_PROMPT,
         "Perform a complete drawing standards compliance check on this engineering drawing. Return structured JSON only.",
-        max_tokens=2200,
+        max_tokens=2400,
         response_format={"type": "json_object"},
     )
     parsed = _parse_json_response(result, "Standards check")
@@ -1986,6 +2680,7 @@ def check_drawing_standards_multiview(views_dict: dict):
     Standards compliance check using all available views in one request so
     projection angle, section callouts, and cross-view consistency are judged
     on the full drawing set rather than a single view.
+    Uses Claude+Gemini pipeline (stitched views) when available.
     """
     ordered_views = []
     for view_name in ["front", "top", "side", "isometric"]:
@@ -2000,7 +2695,7 @@ def check_drawing_standards_multiview(views_dict: dict):
         ordered_views,
         STANDARDS_CHECKER_PROMPT,
         "Perform a complete drawing standards compliance check across all provided views. Cross-check projection angle, section callouts, dimensioning consistency, and missing-view issues. Return structured JSON only.",
-        max_tokens=2600,
+        max_tokens=2800,
         response_format={"type": "json_object"},
     )
     parsed = _parse_json_response(result, "Standards check (multi-view)")
@@ -2014,7 +2709,7 @@ def check_drawing_standards_multiview(views_dict: dict):
 import uuid
 
 WORKSPACE_FILE = "workspace.json"
-WORKSPACE_DIR  = "workspace_drawings"
+WORKSPACE_DIR = "workspace_drawings"
 
 
 def _ensure_workspace_dir():
@@ -2038,23 +2733,25 @@ def save_workspace(ws):
 
 def workspace_create_project(name, description="", created_by=""):
     _ensure_workspace_dir()
-    ws  = load_workspace()
+    ws = load_workspace()
     pid = str(uuid.uuid4())[:8]
     ws["projects"][pid] = {
-        "id":          pid,
-        "name":        name,
+        "id": pid,
+        "name": name,
         "description": description,
-        "created_by":  created_by,
-        "created_at":  datetime.now().isoformat(),
-        "drawings":    {},
-        "members":     [created_by] if created_by else [],
-        "status":      "active",
+        "created_by": created_by,
+        "created_at": datetime.now().isoformat(),
+        "drawings": {},
+        "members": [created_by] if created_by else [],
+        "status": "active",
     }
     save_workspace(ws)
     return pid
 
 
-def workspace_add_drawing(project_id, uploaded_file, uploader, revision_note="Initial upload"):
+def workspace_add_drawing(
+    project_id, uploaded_file, uploader, revision_note="Initial upload"
+):
     """Add a new drawing or new revision to a project. Returns drawing_id."""
     _ensure_workspace_dir()
     ws = load_workspace()
@@ -2063,8 +2760,8 @@ def workspace_add_drawing(project_id, uploaded_file, uploader, revision_note="In
 
     proj = ws["projects"][project_id]
     name = uploaded_file.name
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    did  = f"{ts}_{name}"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    did = f"{ts}_{name}"
     dest = os.path.join(WORKSPACE_DIR, did)
 
     uploaded_file.seek(0)
@@ -2074,20 +2771,20 @@ def workspace_add_drawing(project_id, uploaded_file, uploader, revision_note="In
     uploaded_file.seek(0)
 
     existing = [d for d in proj["drawings"].values() if d["original_name"] == name]
-    rev_num  = len(existing) + 1
+    rev_num = len(existing) + 1
 
     proj["drawings"][did] = {
-        "id":            did,
+        "id": did,
         "original_name": name,
-        "path":          dest,
-        "revision":      rev_num,
-        "uploaded_by":   uploader,
-        "uploaded_at":   datetime.now().isoformat(),
+        "path": dest,
+        "revision": rev_num,
+        "uploaded_by": uploader,
+        "uploaded_at": datetime.now().isoformat(),
         "revision_note": revision_note,
-        "status":        "pending_review",
-        "comments":      [],
-        "size_mb":       round(len(raw) / (1024 * 1024), 2),
-        "analysis":      None,
+        "status": "pending_review",
+        "comments": [],
+        "size_mb": round(len(raw) / (1024 * 1024), 2),
+        "analysis": None,
     }
     save_workspace(ws)
     return did
@@ -2095,20 +2792,22 @@ def workspace_add_drawing(project_id, uploaded_file, uploader, revision_note="In
 
 def workspace_add_comment(project_id, drawing_id, author, text, comment_type="comment"):
     """Add a comment or review action to a drawing."""
-    ws   = load_workspace()
+    ws = load_workspace()
     proj = ws["projects"].get(project_id)
     if not proj:
         return
     drawing = proj["drawings"].get(drawing_id)
     if not drawing:
         return
-    drawing["comments"].append({
-        "id":     str(uuid.uuid4())[:8],
-        "author": author,
-        "text":   text,
-        "type":   comment_type,
-        "ts":     datetime.now().isoformat(),
-    })
+    drawing["comments"].append(
+        {
+            "id": str(uuid.uuid4())[:8],
+            "author": author,
+            "text": text,
+            "type": comment_type,
+            "ts": datetime.now().isoformat(),
+        }
+    )
     if comment_type == "approval":
         drawing["status"] = "approved"
     elif comment_type == "rejection":
@@ -2119,7 +2818,7 @@ def workspace_add_comment(project_id, drawing_id, author, text, comment_type="co
 
 
 def workspace_set_analysis(project_id, drawing_id, analysis_text):
-    ws   = load_workspace()
+    ws = load_workspace()
     proj = ws["projects"].get(project_id)
     if proj and drawing_id in proj["drawings"]:
         proj["drawings"][drawing_id]["analysis"] = analysis_text
@@ -2128,14 +2827,18 @@ def workspace_set_analysis(project_id, drawing_id, analysis_text):
 
 def workspace_get_drawing_history(project_id, original_name):
     """Return all revisions of a filename, sorted oldest to newest."""
-    ws   = load_workspace()
+    ws = load_workspace()
     proj = ws["projects"].get(project_id, {})
-    revs = [d for d in proj.get("drawings", {}).values() if d["original_name"] == original_name]
+    revs = [
+        d
+        for d in proj.get("drawings", {}).values()
+        if d["original_name"] == original_name
+    ]
     return sorted(revs, key=lambda d: d["revision"])
 
 
 def workspace_delete_project(project_id):
-    ws   = load_workspace()
+    ws = load_workspace()
     proj = ws["projects"].get(project_id)
     if proj:
         for d in proj["drawings"].values():
