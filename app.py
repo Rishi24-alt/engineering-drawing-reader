@@ -161,18 +161,41 @@ def _inject_corner_sidebar_toggle():
 
           // Strip inline padding-top / margin-top that Streamlit injects at runtime
           function stripTopPadding() {
+                        // App shell wrappers
+                        const shell = d.querySelector('[data-testid="stAppViewContainer"]');
+                        if (shell) {
+                            shell.style.setProperty('padding-top', '0px', 'important');
+                            shell.style.setProperty('margin-top', '0px', 'important');
+                        }
+                        const main = d.querySelector('[data-testid="stMain"]');
+                        if (main) {
+                            main.style.setProperty('padding-top', '0px', 'important');
+                            main.style.setProperty('margin-top', '0px', 'important');
+                        }
             // Main block container
             const mbc = d.querySelector('[data-testid="stMainBlockContainer"]');
             if (mbc) {
               mbc.style.setProperty('padding-top', '0px', 'important');
               mbc.style.setProperty('margin-top', '0px', 'important');
             }
+                        // Streamlit wrappers often receive runtime top offsets
+                        d.querySelectorAll('[data-testid="stMain"] > div, [data-testid="stMain"] > div > div').forEach((node) => {
+                            node.style.setProperty('padding-top', '0px', 'important');
+                            node.style.setProperty('margin-top', '0px', 'important');
+                        });
             // block-container (the inner div Streamlit styles inline)
             const bc = d.querySelector('.block-container');
             if (bc) {
               bc.style.setProperty('padding-top', '0px', 'important');
               bc.style.setProperty('margin-top', '0px', 'important');
             }
+                        // Sidebar shell alignment
+                        const sb = d.querySelector('[data-testid="stSidebar"]');
+                        if (sb) {
+                            sb.style.setProperty('margin-top', '0px', 'important');
+                            sb.style.setProperty('padding-top', '0px', 'important');
+                            sb.style.setProperty('top', '0px', 'important');
+                        }
             // stHeader — force out of flow
             const hdr = d.querySelector('[data-testid="stHeader"]');
             if (hdr) {
@@ -1365,6 +1388,13 @@ html, body {
     overflow-x: hidden !important;
     overflow-y: auto !important;
 }
+[data-testid="stApp"],
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stSidebar"] {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%) !important;
     overflow: hidden !important;
@@ -1385,6 +1415,13 @@ html, body {
     max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
+}
+[data-testid="stMain"] > div,
+[data-testid="stMain"] > div > div,
+[data-testid="stMain"] [data-testid="stMainBlockContainer"],
+[data-testid="stMain"] .block-container {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
 }
 /* Remove Streamlit's default extra top gutter that creates a large dead zone */
 [data-testid="stMainBlockContainer"] {
