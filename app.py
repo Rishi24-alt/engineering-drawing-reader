@@ -1363,7 +1363,7 @@ html, body {
     font-family: 'Syne', sans-serif;
     letter-spacing: -0.01em;
     overflow-x: hidden !important;
-    overflow-y: hidden !important;
+    overflow-y: auto !important;
 }
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #050505 0%, #000000 22%, #000000 100%) !important;
@@ -1372,16 +1372,17 @@ html, body {
     flex-direction: row !important;
     align-items: stretch !important;
     justify-content: flex-start !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+    max-height: none !important;
 }
 [data-testid="stMain"] {
     background: transparent !important;
     flex: 1 !important;
     align-self: stretch !important;
-    min-height: 100vh !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+    max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
 }
@@ -1439,7 +1440,7 @@ html, body {
     max-width: var(--app-shell-max-width) !important;
     margin: 0 auto !important;
     padding: 0 24px 12px 24px !important;
-    min-height: unset !important;
+    min-height: auto !important;
     height: auto !important;
     max-height: unset !important;
     overflow: visible !important;
@@ -1493,7 +1494,7 @@ html, body {
     min-width: 320px !important;
     max-width: 320px !important;
     align-self: stretch !important;
-    height: 100vh !important;
+    height: 100dvh !important;
     top: 0 !important;
     flex-shrink: 0 !important;
 }
@@ -1515,7 +1516,7 @@ html, body {
 }
 [data-testid="stSidebar"] > div:first-child {
     padding: 14px 14px 14px !important;
-    height: 100vh !important;
+    height: 100dvh !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     overscroll-behavior: contain !important;
@@ -1801,6 +1802,13 @@ div[data-testid="stHorizontalBlock"] div[data-testid="column"] > div > div > div
 @media (max-width: 1200px) {
     :root {
         --app-shell-max-width: min(100vw, 100%);
+    }
+    html, body {
+        overflow-y: auto !important;
+    }
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {
+        min-height: 100vh !important;
     }
     .block-container {
         width: 100% !important;
